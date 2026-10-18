@@ -2393,14 +2393,15 @@ class EjeePet(QWidget):
                 hy = self.head_top + random.uniform(-6, 26)
                 kind = "heart" if random.random() < 0.6 else "star"
                 self.particles.append(Particle(kind, hx, hy, self.t))
-        # angry 冒蒸汽
+        # angry 冒蒸汽（气到冒烟：节奏更急、上浮更冲）
         if self.state == "angry":
             self._fx_timer -= dt
             if self._fx_timer <= 0:
-                self._fx_timer = 0.3
+                self._fx_timer = 0.18
                 sx = self.BCX + random.uniform(-70, 70)
-                self.particles.append(Particle("steam", sx,
-                                               self.head_top + 8, self.t))
+                pt = Particle("steam", sx, self.head_top + 8, self.t)
+                pt.vy = random.uniform(-74, -54)
+                self.particles.append(pt)
         # sleep 冒 Zzz（头顶右上慢飘，避开叶子）
         if self.state == "sleep":
             self._fx_timer -= dt
@@ -2794,19 +2795,31 @@ class EjeePet(QWidget):
             p.restore()
         # （原"委屈眼上眼穹顶"已删除；现在可怜层改成直接复用 angry 这一套
         #   眉眼：puff 弹簧被 _pity 顶起，所以面包掉地上时画的就是怒容眉。）
-        # 怒容眉眼（官方表情 4，随 puff 弹簧渐显）：眼周淡阴影 +
-        # 粗短倒 V 眉相切压住瞳孔顶缘（内端低外端高、斜率自然），
-        # 与 ω 嘴描边同色同画风；瞳孔高光保持素材自然状态不变
+        # 怒容眉眼（官方表情 4，随 puff 弹簧渐显）：眼周淡阴影 + 脸红 +
+        # 半眯怒视眼（上眼睑盖住瞳孔上半 + 粗眼线）+ 眉心折角压眉。
+        # 素材月牙是"笑眼"符号，直接配怒眉会各说各话——用半透明上眼睑
+        # 把它压成"怒视下压眼"，剩下的下半弧恰好就是压着的怒眼形状。
         if c["puff"] > 0.03:
             pf = clamp(c["puff"], 0.0, 1.0)
             p.save()
             p.setOpacity(pf)
+            # 脸红：脸颊外侧两团低透明度暖红径向渐变（气到脸红），
+            # 位置在腮红点下方外侧，不糊眼睛
+            for sgn in (-1, 1):
+                bl = QRadialGradient(QPointF(sgn * 96, -26), 30)
+                bl.setColorAt(0.0, QColor(232, 110, 90, 60))
+                bl.setColorAt(1.0, QColor(232, 110, 90, 0))
+                p.setPen(Qt.NoPen)
+                p.setBrush(QBrush(bl))
+                p.drawEllipse(QPointF(sgn * 96, -26), 30, 22)
             for key, sgn in (("eye_l", -1), ("eye_r", 1)):
                 ex, ey, ew, eh = self.eye_pos[key]
                 ex -= self.BCX
                 ey -= self.BCY
+                # 怒眉微颤：气到眉毛发抖（左右眼错开相位）
+                quiv = math.sin(self.t * 17.0 + (0.0 if sgn < 0 else 1.7)) * 0.4
                 cx = ex + gaze[0] * self.facing * 3.5
-                cy = ey + c["eye_dy"] + gaze[1] * 2.5
+                cy = ey + c["eye_dy"] + gaze[1] * 2.5 + quiv
                 # 眼周淡阴影：径向渐变深色（中心实、边缘透明），柔和压暗
                 p.setPen(Qt.NoPen)
                 sh = QRadialGradient(cx + sgn * ew * 0.04, cy - eh * 0.46,
@@ -2816,15 +2829,33 @@ class EjeePet(QWidget):
                 p.setBrush(QBrush(sh))
                 p.drawEllipse(QPointF(cx + sgn * ew * 0.04, cy - eh * 0.46),
                               ew * 0.52, eh * 0.32)
-                # 怒容眉：向下弧线卧在眼睛上缘——中段轻触眼顶
-                # （眼顶=cy-0.50eh，弧腹最低点≈-0.52eh 恰好搭在缘上），
-                # 两端微扬、不伸入眼内
-                brow = QPainterPath()
-                brow.moveTo(cx + sgn * ew * 0.32, cy - eh * 0.64)
-                brow.quadTo(cx + sgn * ew * 0.02, cy - eh * 0.46,
-                            cx - sgn * ew * 0.28, cy - eh * 0.54)
-                p.setPen(QPen(EYE_DARK, 5.0, Qt.SolidLine, Qt.RoundCap))
+                # 上眼睑：半透明深色盖住瞳孔上半（保留下半弧与高光）。
+                # 三层同心椭圆由内到外递减 alpha 叠加出柔和过渡——
+                # 单一径向渐变是正圆，映射到扁椭圆会在上下缘留下硬边
+                p.setPen(Qt.NoPen)
+                lrx, lry = ew * 0.46, eh * 0.24
+                lcx, lcy = cx, cy - eh * 0.12
+                for k, aa in ((0.62, 132), (0.80, 74), (1.0, 36)):
+                    p.setBrush(QColor(58, 39, 30, aa))
+                    p.drawEllipse(QPointF(lcx, lcy),
+                                  lrx * k, lry * (k * 0.85 + 0.15 * (1 - k)))
+                # 怒眼线：沿上眼睑下缘一道细弧，外眼角高、内眼角低，
+                # 与折角眉走向呼应（压下来的上眼皮边缘）
+                p.setPen(QPen(EYE_DARK, 3.6, Qt.SolidLine, Qt.RoundCap))
                 p.setBrush(Qt.NoBrush)
+                line = QPainterPath()
+                line.moveTo(cx + sgn * ew * 0.44, cy + eh * 0.02)
+                line.quadTo(cx + sgn * ew * 0.02, cy + eh * 0.18,
+                            cx - sgn * ew * 0.38, cy + eh * 0.08)
+                p.drawPath(line)
+                # 折角压眉：外端高 -> 中段转折点压到眼顶内缘 -> 内端，
+                # 三段直线 + 圆角连接（平滑斜线像"严肃"，折角才像"生气"）
+                brow = QPainterPath()
+                brow.moveTo(cx + sgn * ew * 0.30, cy - eh * 0.66)
+                brow.lineTo(cx + sgn * ew * 0.04, cy - eh * 0.42)
+                brow.lineTo(cx - sgn * ew * 0.28, cy - eh * 0.56)
+                p.setPen(QPen(EYE_DARK, 5.5, Qt.SolidLine,
+                              Qt.RoundCap, Qt.RoundJoin))
                 p.drawPath(brow)
             p.restore()
 
@@ -2900,14 +2931,14 @@ class EjeePet(QWidget):
                 # （中峰上拱）-> 右嘴角，同色同粗完全一体；ω 精灵同步
                 # 淡出，整条 W 相对原位微垂。
                 # （可怜层走同一分支：用户要求掉面包时的表情与 angry 一致）
-                dy_m = 2.2 * alt
+                dy_m = 2.2 * alt + math.sin(self.t * 19.0) * 0.45  # 微垂+气到嘴抖
                 sw = OMEGA_SW * s2
                 rx = mw * 0.24
                 ry = mh * 0.34
                 cyB = mcy + mh * 0.5 - 1.0 - sw * 0.5 - ry + dy_m
                 cx_l = mcx - rx * 0.92
                 cx_r = mcx + rx * 0.92
-                peak_y = cyB - ry - 1.5
+                peak_y = cyB - ry - 2.5
 
                 def _el(cx, ang):
                     a_ = math.radians(ang)
@@ -2925,7 +2956,10 @@ class EjeePet(QWidget):
                 path.lineTo(p_l)
                 path.arcTo(QRectF(cx_l - rx, cyB - ry, 2 * rx, 2 * ry),
                            160, 230)                         # 左碗过底
-                path.quadTo(QPointF(mcx, peak_y), _el(cx_r, 150))  # 中峰
+                # 中峰：cubic 双控制点收在窄缝里出尖（quad 峰偏圆钝）
+                path.cubicTo(QPointF(mcx - rx * 0.16, peak_y),
+                             QPointF(mcx + rx * 0.16, peak_y),
+                             _el(cx_r, 150))                 # 尖峰
                 path.arcTo(QRectF(cx_r - rx, cyB - ry, 2 * rx, 2 * ry),
                            150, 230)                         # 右碗过底
                 path.lineTo(p_r.x() + 2.4, p_r.y() + mh * 0.38)  # 右嘴角底

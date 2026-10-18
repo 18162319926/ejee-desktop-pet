@@ -2998,8 +2998,8 @@ class EjeePet(QWidget):
             # 舌头：竖向胶囊 + 中缝，从嘴角下方探出
             tcx = mcx + mw * 0.05
             ty0 = mcy + mh * 0.05
-            tw0 = mw * 0.16
-            th0 = mh * 0.40
+            tw0 = mw * 0.21
+            th0 = mh * 0.55
             p.setPen(QPen(QColor("#C9737F"), 2.0, Qt.SolidLine, Qt.RoundCap))
             p.setBrush(QColor(232, 137, 154))
             p.drawRoundedRect(QRectF(tcx - tw0 / 2, ty0, tw0, th0),

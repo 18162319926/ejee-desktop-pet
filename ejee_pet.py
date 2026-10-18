@@ -63,7 +63,7 @@ EJEE（伊吉）桌面宠物 —— 功能说明
                            淡出，不再撞内沿挂水渍；喷完沿屏幕边「略略略」溜走
                            130px 再回落
      · 拖拽                随速度倾斜 / 体积守恒拉伸，松手惯性滑行撞墙回弹；
-                           拖到屏幕边缘会被激怒（带刺爆炸框台词）；
+                           拖到屏幕边缘会被激怒（波浪边气鼓框台词）；
                            2.6 秒内在边缘来回换 4 次方向 → 晕车（见 dizzy）
      · 双击                尺寸复位 1.0x（并撤销这次双击第一击挂起的喂食）
      · Shift + 滚轮        缩放 0.5x ~ 3.0x（以光标为锚点，弹簧缓动）
@@ -73,8 +73,9 @@ EJEE（伊吉）桌面宠物 —— 功能说明
 四、陪伴功能
      · 多形态气泡          框型 + 皮肤随情绪切换（主题表 BUBBLE_THEMES，
                            解析见 _bubble_theme）：
-                           cloud 奶油云泡泡（日常/摸头/喂食/问候/闲聊）
-                           · burst 带刺爆炸框（生气/被打扰）
+                           cloud 奶油云泡泡（日常/摸头/喂食/问候/闲聊；
+                                 手绘感圆角框，四边极轻起伏）
+                           · burst 波浪边"气鼓"框（生气/被打扰）
                            · round 圆形泡泡框（打嗝/拒食，会轻轻呼吸）
                            · zzz 睡泡泡里的 Zzz（睡眠）
                            状态皮肤：傲娇粉+小爱心 · 果汁橙+挂汁滴 ·
@@ -1503,7 +1504,7 @@ class EjeePet(QWidget):
 
         style 决定气泡的框型（皮肤由 _bubble_theme 按当前状态再细化）：
           cloud  默认云朵框（日常 / 摸头 / 喂食 / 闲聊）
-          burst  带刺的爆炸框（生气、被打扰）
+          burst  波浪边的"气鼓"框（生气、被打扰）
           round  圆形泡泡框（打嗝、吃饱满足）
           zzz    睡泡泡里的 Zzz（睡眠：三只小泡泡各坐一个 Z）
         """
@@ -2820,29 +2821,45 @@ class EjeePet(QWidget):
                 quiv = math.sin(self.t * 17.0 + (0.0 if sgn < 0 else 1.7)) * 0.4
                 cx = ex + gaze[0] * self.facing * 3.5
                 cy = ey + c["eye_dy"] + gaze[1] * 2.5 + quiv
-                # 下眼睑绷紧线：贴着眼睛可见下缘（素材实际可见区 ±0.41eh）
-                # 一道细弧，内眼角低、外眼角收——瞪视时下眼睑用力的感觉。
-                # 不用任何半透明椭圆盖眼睛（用户要求），眼睛保持素材原样
-                p.setPen(QPen(EYE_DARK, 3.2, Qt.SolidLine, Qt.RoundCap))
-                p.setBrush(Qt.NoBrush)
-                line = QPainterPath()
-                line.moveTo(cx + sgn * ew * 0.28, cy + 0.27 * eh)
-                line.quadTo(cx + sgn * ew * 0.02, cy + 0.44 * eh,
-                            cx - sgn * ew * 0.28, cy + 0.27 * eh)
-                p.drawPath(line)
-                # 怒眉：眉尾略低 -> 外侧拱起眉峰 -> 一路压到眉头（内端最低，
-                # 贴住眼睛可见顶 -0.41eh）。两段 quad 出自然眉弧——直线像
-                # 斜杠、三段折角太硬、内端回抬会变"愁眉"
-                brow = QPainterPath()
-                brow.moveTo(cx + sgn * ew * 0.32, cy - 0.56 * eh)
-                brow.quadTo(cx + sgn * ew * 0.26, cy - 0.63 * eh,
-                            cx + sgn * ew * 0.16, cy - 0.62 * eh)
-                brow.quadTo(cx + sgn * ew * 0.00, cy - 0.54 * eh,
-                            cx - sgn * ew * 0.26, cy - 0.40 * eh)
-                p.setPen(QPen(EYE_DARK, 4.4, Qt.SolidLine,
-                              Qt.RoundCap, Qt.RoundJoin))
-                p.drawPath(brow)
+                # 怒眉：不画描边线，改成一笔填充的眉形——眉尾细、眉腰略粗、
+                # 眉头收尖，沿横向带一点自然的拱度（像手绘一笔带过的眉毛，
+                # 与底图柔和的渐变/高光融得住；等宽曲线会像贴上去的黑线条）
+                p.setPen(Qt.NoPen)
+                p.setBrush(QColor(EYE_DARK))
+                p.drawPath(self._brow_path(cx, cy, ew, eh, sgn))
             p.restore()
+
+    @staticmethod
+    def _brow_path(cx, cy, ew, eh, sgn):
+        """生气眉：一笔填充出来的锥形眉（眉尾细 -> 眉腰最粗 -> 眉头收尖），
+        脊线带一点拱度。等宽描边线会像"贴上去的黑条"，填充笔触更像
+        画在脸上的眉毛，也和底图的柔和渐变融得住。
+        sgn = -1 左眼（外侧在左）/ +1 右眼。"""
+        N = 14
+        tops, bots = [], []
+        for i in range(N + 1):
+            u = i / N
+            x = cx + sgn * ew * (0.28 - 0.58 * u)
+            y = cy + eh * (-0.545 + 0.170 * u + 0.014 * math.sin(math.pi * u))
+            # 脊线切向（沿 u 增大方向）-> 法向（指向上方）
+            v = min(1.0, u + 0.01)
+            x2 = cx + sgn * ew * (0.28 - 0.58 * v)
+            y2 = cy + eh * (-0.545 + 0.170 * v
+                            + 0.014 * math.sin(math.pi * v))
+            tx, ty = x2 - x, y2 - y
+            ln = math.hypot(tx, ty) or 1.0
+            nx, ny = ty / ln, -tx / ln
+            half = eh * 0.026 * math.sin(math.pi * u) ** 0.7
+            tops.append(QPointF(x + nx * half, y + ny * half))
+            bots.append(QPointF(x - nx * half, y - ny * half))
+        path = QPainterPath()
+        path.moveTo(tops[0])
+        for pt in tops[1:]:
+            path.lineTo(pt)
+        for pt in reversed(bots):
+            path.lineTo(pt)
+        path.closeSubpath()
+        return path
 
     def _draw_mouth(self, p, f):
         """嘴：ω 精灵 + 各表情嘴（张嘴笑 / 吐舌 / 生气 W / 睡眠圆嘴 /
@@ -2939,7 +2956,7 @@ class EjeePet(QWidget):
                 p.setPen(pen)
                 p.setBrush(Qt.NoBrush)
                 path = QPainterPath()
-                path.moveTo(p_l.x() - 2.4, p_l.y() + mh * 0.38)  # 左嘴角底
+                path.moveTo(p_l.x() - 1.5, p_l.y() + mh * 0.20)  # 左嘴角底
                 path.lineTo(p_l)
                 path.arcTo(QRectF(cx_l - rx, cyB - ry, 2 * rx, 2 * ry),
                            160, 230)                         # 左碗过底
@@ -2949,7 +2966,7 @@ class EjeePet(QWidget):
                              _el(cx_r, 150))                 # 尖峰
                 path.arcTo(QRectF(cx_r - rx, cyB - ry, 2 * rx, 2 * ry),
                            150, 230)                         # 右碗过底
-                path.lineTo(p_r.x() + 2.4, p_r.y() + mh * 0.38)  # 右嘴角底
+                path.lineTo(p_r.x() + 1.5, p_r.y() + mh * 0.20)  # 右嘴角底
                 p.drawPath(path)
                 p.setPen(Qt.NoPen)
             p.setOpacity(1.0)
@@ -3745,58 +3762,66 @@ class EjeePet(QWidget):
             p.drawPath(path)                    # 再填暖棕
         p.setPen(Qt.NoPen)
 
+    @staticmethod
+    def _wavy_edge(path, ax, ay, bx_, by_, n, amp, phase=0.0):
+        """沿 a->b 画 n 段圆滑波浪（每段中点沿外法向偏移 amp）。
+
+        用于生气框：平滑起伏的边比一圈三角尖刺自然得多（尖刺像太阳，
+        和 Q 版画风不搭）。amp 正为正向外鼓、负为向内凹，相邻段交替。
+        """
+        dx, dy = bx_ - ax, by_ - ay
+        ln = math.hypot(dx, dy) or 1.0
+        nx, ny = dy / ln, -dx / ln       # 顺时针遍历时的外法向
+        for i in range(n):
+            t1 = (i + 1) / n
+            tm = (i + 0.5) / n
+            m = amp * math.sin(math.pi * (i + 0.5) + phase)
+            path.quadTo(QPointF(ax + dx * tm + nx * m,
+                                ay + dy * tm + ny * m),
+                        QPointF(ax + dx * t1, ay + dy * t1))
+
+    def _bubble_blob_path(self, bx, y_b, w, h, r=15.0):
+        """手绘感的对话泡：圆角矩形，四条边带极轻的起伏（上边微鼓、
+        右边略饱、下边微垂）。不再是"圆角方块 + 顶缘三颗固定小圆凸"
+        那种机械拼装，像随手勾出来的一朵气泡。"""
+        x0, y0 = bx, y_b - h
+        x1, y1 = bx + w, y_b
+        mx, my = (x0 + x1) / 2.0, (y0 + y1) / 2.0
+        path = QPainterPath()
+        path.moveTo(x0 + r, y0)
+        path.quadTo(mx, y0 - 2.8, x1 - r, y0)              # 上边轻上鼓
+        path.quadTo(x1, y0, x1, y0 + r)                    # 右上圆角
+        path.quadTo(x1 + 2.0, my, x1, y1 - r)              # 右边略饱
+        path.quadTo(x1, y1, x1 - r, y1)                    # 右下圆角
+        path.quadTo(mx, y1 + 1.5, x0 + r, y1)              # 下边微垂
+        path.quadTo(x0, y1, x0, y1 - r)                    # 左下圆角
+        path.quadTo(x0 - 1.8, my, x0, y0 + r)              # 左边略饱
+        path.quadTo(x0, y0, x0 + r, y0)                    # 左上圆角
+        path.closeSubpath()
+        return path
+
     def _bubble_cloud_path(self, bx, y_b, w, h):
-        """云朵框：圆角矩形主体 + 顶缘三朵云凸 + 指向头顶的小弯尾。"""
-        cloud = QPainterPath()
-        cloud.addRoundedRect(QRectF(bx, y_b - h, w, h), 13, 13)
-        for fx in (0.26, 0.50, 0.74):
-            bump = QPainterPath()
-            bump.addEllipse(QPointF(bx + w * fx, y_b - h), 8.5, 8.5)
-            cloud = cloud.united(bump)
-        tail = QPainterPath()
-        tail.moveTo(bx + w / 2 - 11, y_b - 2)
-        tail.quadTo(self.BCX - 3, y_b + 3, self.BCX, y_b + 15)
-        tail.quadTo(self.BCX + 3, y_b + 3, bx + w / 2 + 11, y_b - 2)
-        tail.closeSubpath()
-        return cloud.united(tail)
+        """云朵框：手绘感主体 + 指向头顶的小弯尾。"""
+        return self._bubble_blob_path(bx, y_b, w, h)
 
     def _bubble_burst_path(self, bx, y_b, w, h):
-        """带刺的爆炸框：矩形轮廓外每边扎一排长短交错的尖刺（生气专用）。"""
-        cx, cy = bx + w / 2.0, y_b - h / 2.0
-        hw, hh = w / 2.0, h / 2.0
+        """生气框：边线起伏的"气鼓起来"的气泡。四边平滑波浪 + 圆角，
+        不再用一圈锐利三角尖刺（像太阳，太硬）。"""
+        x0, y0 = bx, y_b - h
+        x1, y1 = bx + w, y_b
+        r = 12.0
+        amp = 3.2
         path = QPainterPath()
-        # 绕矩形一周的尖刺参数：(x, y, 刺长)
-        spikes = []
-        n_side = 5
-        for i in range(n_side):
-            fx = (i + 0.5) / n_side
-            ln = 9.0 if i % 2 == 0 else 15.0
-            spikes.append((bx + w * fx, y_b - h, -1.0, ln))
-            spikes.append((bx + w * fx, y_b, 1.0, ln))
-        for i in range(3):
-            fy = (i + 0.5) / 3
-            ln = 8.0 if i % 2 == 0 else 13.0
-            spikes.append((bx, y_b - h + h * fy, -1.0, ln))
-            spikes.append((bx + w, y_b - h + h * fy, 1.0, ln))
-        # 主体：略微内缩的圆角矩形（尖刺从边缘长出来）
-        path.addRoundedRect(QRectF(cx - hw + 3, cy - hh + 3,
-                                    2 * (hw - 3), 2 * (hh - 3)), 9, 9)
-        # 尖刺：每根画成从边缘向外的细长三角（底窄顶尖，像爆炸的火星）
-        for sx_, sy_, sgn, ln in spikes:
-            if sgn < 0:
-                tx, ty = sx_, sy_
-                bx1, by1 = sx_ - 2.0, sy_ + ln * 0.55
-                bx2, by2 = sx_ + 2.0, sy_ + ln * 0.55
-            else:
-                tx, ty = sx_, sy_
-                bx1, by1 = sx_ - 2.0, sy_ - ln * 0.55
-                bx2, by2 = sx_ + 2.0, sy_ - ln * 0.55
-            sp = QPainterPath()
-            sp.moveTo(bx1, by1)
-            sp.lineTo(tx, ty)
-            sp.lineTo(bx2, by2)
-            sp.closeSubpath()
-            path = path.united(sp)
+        path.moveTo(x0 + r, y0)
+        self._wavy_edge(path, x0 + r, y0, x1 - r, y0, 4, amp, 0.0)
+        path.quadTo(x1, y0, x1, y0 + r)
+        self._wavy_edge(path, x1, y0 + r, x1, y1 - r, 3, amp, 1.1)
+        path.quadTo(x1, y1, x1 - r, y1)
+        self._wavy_edge(path, x1 - r, y1, x0 + r, y1, 4, amp, 0.7)
+        path.quadTo(x0, y1, x0, y1 - r)
+        self._wavy_edge(path, x0, y1 - r, x0, y0 + r, 3, amp, 1.9)
+        path.quadTo(x0, y0, x0 + r, y0)
+        path.closeSubpath()
         return path
 
     def _bubble_round_path(self, bx, y_b, w, h):
@@ -3891,8 +3916,8 @@ class EjeePet(QWidget):
         fm = p.fontMetrics()
         trect = fm.boundingRect(0, 0, 200, 500,
                                 Qt.TextWordWrap, self.bubble_text)
-        w = max(92.0, trect.width() + 34.0)
-        h = max(36.0, trect.height() + 18.0)
+        w = max(96.0, trect.width() + 44.0)
+        h = max(38.0, trect.height() + 26.0)
         if style == "round":
             # 圆形泡泡：正文改为竖排不换行的窄条（泡泡框本身就窄）
             w = max(72.0, min(w, 150.0))
@@ -3933,8 +3958,8 @@ class EjeePet(QWidget):
         p.scale(sc, sc)
         p.translate(-ax, -ay)
         if style == "burst":
-            # 爆炸框：外层一圈"热气"光晕 + 稍粗的红边（双层描边）
-            p.setPen(QPen(QColor(240, 170, 120, 90), 6.0, Qt.SolidLine,
+            # 生气框：外圈一层极淡的暖光（只做体积感，不抢戏）
+            p.setPen(QPen(QColor(240, 170, 120, 55), 5.0, Qt.SolidLine,
                           Qt.RoundCap, Qt.RoundJoin))
             p.setBrush(Qt.NoBrush)
             p.drawPath(shape)
@@ -3943,16 +3968,22 @@ class EjeePet(QWidget):
         c_top, c_bot = QColor(th["top"]), QColor(th["bot"])
         grad.setColorAt(0.0, c_top)
         grad.setColorAt(1.0, c_bot)
-        p.setPen(QPen(QColor(th["edge"]), 2.2, Qt.SolidLine,
+        p.setPen(QPen(QColor(th["edge"]), 1.8, Qt.SolidLine,
                       Qt.RoundCap, Qt.RoundJoin))
         p.setBrush(QBrush(grad))
         p.drawPath(shape)
-        # 左上高光（云朵 / 粉 / 汁 / 泪 主题都有，爆炸框不要）
+        # 左上柔光（径向渐变，边缘完全透明——实色椭圆会留下硬边，
+        # 看着像贴在气泡上的一块白斑）
         if th["gloss"] > 0.05 and style != "burst":
             p.setPen(Qt.NoPen)
-            p.setBrush(QColor(255, 255, 255, int(130 * th["gloss"])))
-            p.drawEllipse(QRectF(bx + w * 0.14, y_b - h * 0.88,
-                                 w * 0.30, h * 0.42))
+            gg = QRadialGradient(QPointF(bx + w * 0.30, y_b - h * 0.68),
+                                 max(w * 0.26, h * 0.75))
+            gg.setColorAt(0.0, QColor(255, 255, 255, int(82 * th["gloss"])))
+            gg.setColorAt(0.55, QColor(255, 255, 255, int(34 * th["gloss"])))
+            gg.setColorAt(1.0, QColor(255, 255, 255, 0))
+            p.setBrush(QBrush(gg))
+            p.drawEllipse(QRectF(bx + w * 0.10, y_b - h * 0.94,
+                                 w * 0.44, h * 0.64))
         # 挂饰（爱心 / 汁滴 / 泪滴）
         if th["deco"]:
             self._bubble_deco(p, th["deco"], bx, y_b, w, h)
@@ -3970,7 +4001,7 @@ class EjeePet(QWidget):
             p.drawArc(rr_, 296 * 16, 22 * 16)
         p.setFont(f)
         p.setPen(QPen(INK))
-        p.drawText(QRectF(bx + 6, y_b - h, w - 12, h),
+        p.drawText(QRectF(bx + 15, y_b - h, w - 30, h),
                    Qt.AlignHCenter | Qt.AlignVCenter | Qt.TextWordWrap,
                    self.bubble_text)
         p.restore()

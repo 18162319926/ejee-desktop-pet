@@ -41,7 +41,7 @@ EJEE（伊吉）桌面宠物 —— 功能说明
        + 身体下沉、尾巴无力、悬停时努力抬头；此期间不再触发惊讶/庆祝/散步
      · 睡眠层（sleep_amt）：闭眼弧与 ω 嘴 ⇄ 小圆嘴的交叉渐显
      · 可怜层（屏幕上有面包渣，_pity）：视线锁定残渣 + 表情复用 angry
-       （倒 V 怒眉 + 眼周淡阴影 + 生气 M 嘴；原委屈眼上眼穹顶已删除）
+       （倒 V 怒眉 + 生气撇嘴 + 人中小竖线；原委屈眼上眼穹顶已删除）
 
 三、互动（左键落点分区：尾巴 > 头部 > 身体）
      · 摸头（头部）        开心 + 爱心 + 台词 + 摸头计数；
@@ -2207,7 +2207,7 @@ class EjeePet(QWidget):
             s.step(tgt[key], dt)
             self.cur[key] = s.v
         # 可怜层（面包掉在地上）：表情按用户要求与 angry 完全一致
-        # （倒 V 怒眉 + 眼周淡阴影 + 生气 M 嘴）。用 _pity 显形度把 angry
+        # （倒 V 怒眉 + 生气撇嘴 + 人中小竖线）。用 _pity 显形度把 angry
         # 的眉眼通道（puff）顶起来，叠加在 idle 之上；嘴形见下面 alt_tgt。
         pty = clamp(self._pity.v, 0.0, 1.0)
         if pty > 0.01:
@@ -2220,7 +2220,7 @@ class EjeePet(QWidget):
         # happy 进食期间保持显形（咀嚼开合到闭的瞬间不闪回 ω 嘴）
         op_now = self._mouth_open()
         # 嘴形目标：surprised/angry/happy进食 之外，可怜层（pty）也要顶到
-        # 全显，让掉面包时的嘴形与 angry 一致（生气 M 嘴）。
+        # 全显，让掉面包时的嘴形与 angry 一致（生气撇嘴 + 人中）。
         alt_tgt = max(1.0 if self.state in ("surprised", "angry") \
                       or (self.state == "happy"
                           and (op_now > 0.05 or self.phase == "bread"))
@@ -2554,7 +2554,7 @@ class EjeePet(QWidget):
             "ha": clamp(self.hungry_amt.v, 0.0, 1.0),     # 饥饿表情显形度
             "sa": clamp(self.sleep_amt.v, 0.0, 1.0),      # 睡眠表情显形度
             "ma": clamp(self.mischief_amt.v, 0.0, 1.0),   # 恶作剧表情显形度
-            "pity": clamp(self._pity.v, 0.0, 1.0),        # 残渣显形度（表情复用 angry：怒眉+M 嘴）
+            "pity": clamp(self._pity.v, 0.0, 1.0),        # 残渣显形度（表情复用 angry：怒眉+撇嘴）
             "alt": clamp(self.mouth_alt.v, 0.0, 1.0),     # 替代嘴形显形度
             "blink": self._blink_scale(),
             "bw": self.bw, "bh": self.bh, "s2": self.s,
@@ -2862,11 +2862,11 @@ class EjeePet(QWidget):
         return path
 
     def _draw_mouth(self, p, f):
-        """嘴：ω 精灵 + 各表情嘴（张嘴笑 / 吐舌 / 生气 M / 睡眠圆嘴 /
+        """嘴：ω 精灵 + 各表情嘴（张嘴笑 / 吐舌 / 生气撇嘴 + 人中 / 睡眠圆嘴 /
         饥饿瘪嘴+口水+脸颊凹陷 / 恶作剧坏笑+舌头）。"""
         bw, bh, s2 = f["bw"], f["bh"], f["s2"]
         sa, ma, ha = f["sa"], f["ma"], f["ha"]
-        # 可怜层（面包掉地上）：表情与 angry 一致，这里把生气 M 嘴也画出来
+        # 可怜层（面包掉地上）：表情与 angry 一致，这里把生气撇嘴也画出来
         pty = clamp(self._pity.v, 0.0, 1.0)
         # 嘴：ω 嘴恒显（官方设定），表情嘴从 ω 下缘展开——ω 下轮廓
         # 充当上唇，先画表情嘴再画 ω 精灵，重叠处 ω 笔画保持在最上层
@@ -2929,42 +2929,38 @@ class EjeePet(QWidget):
                               mw * 0.215, dep * 0.54)
                 p.restore()
             elif self.state == "angry" or pty > 0.02:
-                # 生气嘴（官方）：W 翻转成 M——正中那个朝下的谷保持不变，
-                # 两侧只留很浅的拱（弧度约为 W 双碗的一半），两端嘴角垂到
-                # 最低。整张嘴矢量一笔画，同色同粗完全一体；ω 精灵同步淡出，
-                # 整条 M 微垂 + 气到发颤。
+                # 生气嘴：一条弧形撇嘴（两侧弧线朝下、弧度远小于 W 的双碗），
+                # 正中再拉一根人中竖线，顶端插进鼻子下缘 —— 与平静状态的 ω
+                # 一样是"中间朝上连到鼻子"的走向。整条嘴矢量绘制，同色同粗
+                # 完全一体；ω 精灵同步淡出，整条嘴微垂 + 气到发颤。
                 # （可怜层走同一分支：用户要求掉面包时的表情与 angry 一致）
                 dy_m = 2.2 * alt + math.sin(self.t * 19.0) * 0.45  # 微垂+气到嘴抖
                 # 线宽与平静状态（ω 素材）及其他表情嘴线（4.6）保持一致；
                 # OMEGA_SW 是竖穿峰顶的高估值（8.7），直接用会粗一圈
                 sw = 4.6
-                rx = mw * 0.225           # 单个拱的半宽
-                ry = mh * 0.18            # 拱高：比 W 的双碗浅很多（W 是 0.34）
-                # 拱顶贴着 ω 下缘，嘴角落到 ω 之下 —— 整条嘴朝下撇
-                cyT = wbot - 2.5 + ry + dy_m
-                cx_l = mcx - rx
-                cx_r = mcx + rx
-                tail = mh * 0.12          # 嘴角向外的下垂小尾巴
-                # 两拱在正中相切（起点 180° 扫到 0°），切点自成一个朝下的
-                # 尖谷；若让角度越过赤道去"交叉"，中间反而会多出一截圆头
-                a0, swp = 180.0, -180.0
-                a1 = math.radians(a0 + swp)
-                y_end = cyT - ry * math.sin(a1)
-                x_l = cx_l + rx * math.cos(math.radians(a0))
-                x_r = cx_r + rx * math.cos(a1)
+                hx = mw * 0.26            # 嘴角半宽
+                y_apex = wbot - mh * 0.29 + dy_m   # 撇嘴中央（最高处）
+                y_cor = wbot - mh * 0.04 + dy_m    # 嘴角（最低处）
+                y_top = wbot - mh * 0.61 + dy_m    # 人中竖线顶端（探进鼻子）
+                tail = mh * 0.07                   # 嘴角向外的下垂小尾巴
                 pen = QPen(QBrush(QColor(OMEGA_COL)), sw, Qt.SolidLine,
                            Qt.RoundCap, Qt.RoundJoin)
                 p.setPen(pen)
                 p.setBrush(Qt.NoBrush)
                 path = QPainterPath()
-                path.moveTo(x_l - 1.0, y_end + tail)          # 左嘴角底
-                path.lineTo(x_l, y_end)
-                path.arcTo(QRectF(cx_l - rx, cyT - ry, 2 * rx, 2 * ry),
-                           a0, swp)                           # 左拱过顶
-                path.arcTo(QRectF(cx_r - rx, cyT - ry, 2 * rx, 2 * ry),
-                           a0, swp)                           # 右拱过顶
-                path.lineTo(x_r + 1.0, y_end + tail)          # 右嘴角底
+                path.moveTo(mcx - hx - 1.0, y_cor + tail)     # 左嘴角底
+                path.lineTo(mcx - hx, y_cor)
+                # 一条完整的弧（抛物线）：左嘴角 -> 正中最高的点 -> 右嘴角，
+                # 中间是圆滑的顶，不是两段拼接的平顶
+                path.quadTo(QPointF(mcx, 2.0 * y_apex - y_cor),
+                            QPointF(mcx + hx, y_cor))
+                path.lineTo(mcx + hx + 1.0, y_cor + tail)     # 右嘴角底
                 p.drawPath(path)
+                # 人中竖线：比嘴线略细（像一道人中，不做成一根粗棍）
+                p.setPen(QPen(QBrush(QColor(OMEGA_COL)), sw * 0.74,
+                              Qt.SolidLine, Qt.RoundCap))
+                p.drawLine(QPointF(mcx, y_apex + 0.6),
+                           QPointF(mcx, y_top))
                 p.setPen(Qt.NoPen)
             p.setOpacity(1.0)
         # ω 嘴绘制：happy 张嘴笑 / surprised 吐舌时 ω 充当"上唇"必须保留；
@@ -4825,14 +4821,14 @@ def main():
             pet.particles.append(bp)
         pet.t = 24.35
         pet.grab().save(os.path.join(PREVIEW_DIR, "preview_dizzy.png"))
-        # 可怜层：盯着掉在地上的面包渣（表情复用 angry：怒眉 + M 嘴；
+        # 可怜层：盯着掉在地上的面包渣（表情复用 angry：怒眉 + 撇嘴；
         # 气泡换可怜蓝皮肤 + 底缘挂一滴泪——放一枚假残渣让主题解析走到 crumb）
         snap("idle")
         pet._dizzy_amt.snap(0.0)
         pet._dizzy_until = 0.0
         pet._pity.snap(1.0)
         pet.cur["puff"] = 1.0          # 预览：直接顶起怒容眉
-        pet.mouth_alt.snap(1.0)        # 预览：直接顶起生气 M 嘴
+        pet.mouth_alt.snap(1.0)        # 预览：直接顶起生气撇嘴
         pet._crumbs = [_PreviewCrumb()]
         pet.particles.clear()
         pet.t = 28.0

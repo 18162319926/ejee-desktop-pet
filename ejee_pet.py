@@ -2987,6 +2987,38 @@ class EjeePet(QWidget):
         if ma > 0.02 and sa < 0.5 and alt < 0.5:
             # 恶作剧吐舌头：单边翘起的坏笑弧 + 探出来的粉舌头
             p.setOpacity(ma)
+            # 舌头先画：竖向胶囊只描「侧壁 + 圆底」，顶部敞开不描边——
+            # 让随后画上的嘴线描边盖住舌根，看不出接缝（闭合全包会像贴了颗胶囊）
+            tcx = mcx + mw * 0.05
+            ty0 = mcy + mh * 0.05          # 舌顶探进嘴线描边带内，左右壁都不露头
+            tw0 = mw * 0.26
+            th0 = mh * 0.68
+            rect_t = QRectF(tcx - tw0 / 2, ty0 + th0 - tw0, tw0, tw0)
+            # 填充：闭合路径（含顶边），保证舌根颜色连续伸到嘴线后方
+            tf = QPainterPath()
+            tf.moveTo(tcx - tw0 / 2, ty0)
+            tf.lineTo(tcx - tw0 / 2, ty0 + th0 - tw0 / 2)
+            tf.arcTo(rect_t, 180, 180)      # 逆时针过屏幕底部 = 圆底
+            tf.lineTo(tcx + tw0 / 2, ty0)
+            tf.closeSubpath()
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(232, 137, 154))
+            p.drawPath(tf)
+            # 描边：只描侧壁 + 圆底；方帽 + 起点缩进，防止笔帽探出嘴线
+            ts = QPainterPath()
+            ts.moveTo(tcx - tw0 / 2, ty0 + 0.4)
+            ts.lineTo(tcx - tw0 / 2, ty0 + th0 - tw0 / 2)
+            ts.arcTo(rect_t, 180, 180)
+            ts.lineTo(tcx + tw0 / 2, ty0 + 0.4)
+            p.setPen(QPen(QColor("#C9737F"), 2.0, Qt.SolidLine,
+                          Qt.SquareCap, Qt.RoundJoin))
+            p.setBrush(Qt.NoBrush)
+            p.drawPath(ts)
+            # 舌面中缝
+            p.setPen(QPen(QColor("#B25F6C"), 1.4, Qt.SolidLine, Qt.RoundCap))
+            p.drawLine(QPointF(tcx, ty0 + th0 * 0.25),
+                       QPointF(tcx, ty0 + th0 * 0.76))
+            # 坏笑弧最后画：4.6px 描边压在舌根上，舌头就像从嘴里伸出来的
             p.setPen(QPen(QBrush(QColor(OMEGA_COL)), 4.6, Qt.SolidLine,
                           Qt.RoundCap, Qt.RoundJoin))
             p.setBrush(Qt.NoBrush)
@@ -2995,18 +3027,6 @@ class EjeePet(QWidget):
             grin.quadTo(mcx - mw * 0.04, mcy + mh * 0.20,
                         mcx + mw * 0.21, mcy - mh * 0.06)
             p.drawPath(grin)
-            # 舌头：竖向胶囊 + 中缝，从嘴角下方探出
-            tcx = mcx + mw * 0.05
-            ty0 = mcy + mh * 0.05
-            tw0 = mw * 0.21
-            th0 = mh * 0.55
-            p.setPen(QPen(QColor("#C9737F"), 2.0, Qt.SolidLine, Qt.RoundCap))
-            p.setBrush(QColor(232, 137, 154))
-            p.drawRoundedRect(QRectF(tcx - tw0 / 2, ty0, tw0, th0),
-                              tw0 / 2, tw0 / 2)
-            p.setPen(QPen(QColor("#B25F6C"), 1.4, Qt.SolidLine, Qt.RoundCap))
-            p.drawLine(QPointF(tcx, ty0 + th0 * 0.25),
-                       QPointF(tcx, ty0 + th0 * 0.76))
             p.setOpacity(1.0)
 
     def _draw_fantasy(self, p, f):

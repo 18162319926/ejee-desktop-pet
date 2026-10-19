@@ -16,7 +16,12 @@ build_log*.txt
 
 # —— 以下为本地开发/维护产物，不进公开仓库（文件保留在磁盘）——
 # 素材管线：角色原图、4x 超分中间产物、切图与图标生成脚本、超分工具
-tools/
+tools/*
+# 例外：叶子拆分脚本是 assets/leaf*.png、base_body.png 的唯一来源，必须入库
+!tools/make_leaf_assets.py
 # 各状态预览图（--shot 生成）与回归基准，仅本地参考
 previews/
 _baseline/
+
+# 临时脚本 / 原型 / 推送工具
+.tmp/

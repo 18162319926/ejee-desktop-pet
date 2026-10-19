@@ -5,7 +5,7 @@ a = Analysis(
     ['ejee_pet.py'],
     pathex=[],
     binaries=[],
-    datas=[('assets/base.png', '.'), ('assets/eye_l.png', '.'), ('assets/eye_r.png', '.'), ('assets/mouth.png', '.'), ('assets/coords.json', '.'), ('assets/ejee_icon.png', '.'), ('assets/lines.json', '.')],
+    datas=[('assets/base.png', '.'), ('assets/base_body.png', '.'), ('assets/leaf.png', '.'), ('assets/leaf_dry.png', '.'), ('assets/eye_l.png', '.'), ('assets/eye_r.png', '.'), ('assets/mouth.png', '.'), ('assets/coords.json', '.'), ('assets/ejee_icon.png', '.'), ('assets/lines.json', '.')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},

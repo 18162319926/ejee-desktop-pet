@@ -36,7 +36,9 @@ EJEE（伊吉）桌面宠物 —— 功能说明
                 周围缀几颗轻轻漂浮的小泡泡；设定：爱好在泡泡里睡觉），
                 醒来时泡泡"啵"地破成一圈小泡泡
    两层「叠加式」表情图层，可与上面任意状态共存：
-     · 饥饿层（饱食度 < 30，hungry_amt）：垂眼 + 瘪嘴小圆洞 + 口水 + 脸颊凹陷
+     · 饥饿层（饱食度 < 30，hungry_amt）：全身以脚底为支点压扁 15%（软趴），
+      叶子向一侧耷拉转枯，波浪嘴 + 口水，每 3 秒咕咕叫，每 10 秒头顶飘一朵
+      海市蜃楼（云里的牛奶吐司 + 热气）2 秒后啵地破灭，跟着叹一口气
        + 泪花 + 汗滴 + 肚子咕咕声波/音符 + 头顶面包幻想气泡（2s 后"啵"地破灭）
        + 身体下沉、尾巴无力、悬停时努力抬头；此期间不再触发惊讶/庆祝/散步
      · 睡眠层（sleep_amt）：闭眼弧与 ω 嘴 ⇄ 小圆嘴的交叉渐显
@@ -409,6 +411,11 @@ IDLE_CHATTER_EVERY = (240.0, 480.0)  # 自言自语一句
 # 尾巴轻摆：剪切矩形（base 像素）。y>960 只有尾巴大圆与透明背景
 # （大圆左缘 x≈1405-1420，前爪右缘 x<1345，矩形左界留 >40px 缓冲）
 TAIL_RECT = (1350, 960, 1548, 1236)
+
+# 头顶叶子（设计坐标，由 tools/make_leaf_assets.py 从 base.png 拆出）：
+# (左上 x, 左上 y, 宽, 高, 轴心 x, 轴心 y)。轴心＝叶柄插入头皮处，
+# 饥饿耷拉时绕它旋转，根部不动，接缝不会裂开。
+LEAF_GEO = (158.97, 85.0, 51.87, 48.67, 178.59, 132.72)
 
 # ------- 情绪状态参数表（目标值，状态间做指数平滑） -------
 # eye_sx/sy 眼睛缩放; eye_dy 眼睛下移; eye_rot 眼睛外角下垂旋转;
@@ -1410,7 +1417,10 @@ class EjeePet(QWidget):
         self._tail_ph = random.uniform(0.0, 6.28)      # 尾摆相位累积器（可变速）
         self._rumble_i = 0           # 咕咕叫轮次（波浪/音符交替）
         self._fantasy = None         # 幻想气泡 {"t0": 开始时刻}
-        self._next_fantasy = random.uniform(8.0, 14.0)
+        self._next_fantasy = random.uniform(5.0, 8.0)
+        # 叹气：每次海市蜃楼破灭后来一下（身体一沉 + 眼睛半闭）
+        self._sigh_t0 = -99.0
+        self._sigh_dur = 1.25
         self.wink_l = Spring(0.0, 110, 13)     # 左眼眯眼弧（happy/surprised 眨眼）
         self.wink_r = Spring(0.0, 110, 13)     # 右眼眯眼弧（happy 双眼闭）
         # 视线平滑：raw 视线（鼠标/残渣/张望）每帧重算、可能突变，
@@ -1433,7 +1443,7 @@ class EjeePet(QWidget):
         self.last_interact = 0.0             # 最近一次交互（睡眠判定）
         self._wake2 = False                  # 伸懒腰两段进度
         self._fx_timer = 0.0
-        self._fx_timer2 = 5.0         # 咕咕叫计时（每 5 秒一声）
+        self._fx_timer2 = 3.2         # 咕咕叫计时（每 3 秒出头一声）
 
         # 眨眼
         self.next_blink = self._rand_blink_delay()
@@ -1916,13 +1926,18 @@ class EjeePet(QWidget):
         #      左缘距矩形左界有 >40px 透明缓冲，前爪右缘 <1345 不受影响）
         img = Image.open(res_path("base.png")).convert("RGBA")
         bx0, by0, bx1, by1 = TAIL_RECT
+        # 叶子单独成层：底图用“去叶版”，叶子自己按饥饿程度绕根部旋转。
+        # （去叶版由 tools/make_leaf_assets.py 生成并随 assets 打包）
+        img_body = Image.open(res_path("base_body.png")).convert("RGBA")
         clear = Image.new("L", img.size, 0)
         ImageDraw.Draw(clear).rectangle([bx0 + 10, by0, bx1, by1], fill=255)
-        notail = img.copy()
-        notail.putalpha(ImageChops.subtract(img.getchannel("A"), clear))
+        notail = img_body.copy()
+        notail.putalpha(ImageChops.subtract(img_body.getchannel("A"), clear))
         self.base_pm = self._pm_from_pil(notail)
         self.tail_pm = self._pm_from_pil(img.crop((bx0, by0, bx1, by1)))
         self.tail_geo = (bx0, by0, bx1, by1)
+        self.leaf_pm = QPixmap(res_path("leaf.png"))
+        self.leaf_dry_pm = QPixmap(res_path("leaf_dry.png"))
         self.eye_l_pm = QPixmap(res_path("eye_l.png"))
         self.eye_r_pm = QPixmap(res_path("eye_r.png"))
         self.mouth_pm = QPixmap(res_path("mouth.png"))
@@ -2291,20 +2306,27 @@ class EjeePet(QWidget):
             0.5, self.cur["sway_per"] * (1.0 + 0.30 * ha_))
         self._tail_ph += dt * 2 * math.pi / (
             1.9 * (1.0 + 0.45 * ha_) * (1.0 - 0.35 * clamp(self._swim.v, 0.0, 1.0)))
-        # 幻想气泡（牛奶面包）：饿了每隔 12-18 秒头顶冒一次，2 秒后破灭叹气
+        # 海市蜃楼（牛奶吐司）：饿了每 10 秒头顶飘出一朵极小的云，2 秒后啵地破灭
         if (ha_ > 0.5 and self.state == "idle" and self.phase == "idle"
                 and not self._pass and self.t >= self._next_fantasy):
-            self._next_fantasy = self.t + random.uniform(12.0, 18.0)
+            self._next_fantasy = self.t + random.uniform(9.4, 10.6)
             self._fantasy = {"t0": self.t}
         if self._fantasy is not None:
             if self._dragging or self.state == "sleep":
                 self._fantasy = None          # 被拖走/睡着：幻想被打断
             elif self.t - self._fantasy["t0"] > 2.3:
-                self._fantasy = None          # 破灭：叹气小雾泡
-                for i in range(3):
-                    self.particles.append(Particle(
-                        "steam", self.BCX + 58 + random.uniform(-10, 10),
-                        self.head_top + random.uniform(4, 16), self.t - i * 0.08))
+                self._fantasy = None          # 破灭：啵 + 一缕气 + 轻轻叹一口
+                self._sigh_t0 = self.t
+                for i in range(4):            # 破掉的泡皮碎屑
+                    pt = Particle("bubble", self.BCX + 58
+                                  + random.uniform(-14, 14),
+                                  self.head_top + random.uniform(6, 22),
+                                  self.t - i * 0.03)
+                    pt.vx = random.uniform(-46, 46)
+                    pt.vy = random.uniform(-56, -20)
+                    self.particles.append(pt)
+                self.floats.append(("呼…", self.mouth_center[0] + 26,
+                                    self.mouth_center[1] + 6, self.t))
         self._dvx *= math.exp(-10 * dt)
         self._dvy *= math.exp(-10 * dt)
 
@@ -2431,17 +2453,19 @@ class EjeePet(QWidget):
                     * random.uniform(56, 76),
                     self.BCY - 132 + random.uniform(-8, 8), self.t))
 
-        # 肚子咕咕叫：每 5 秒从肚皮冒一道声波纹或小音符（交替，饥饿时）
+        # 肚子咕咕叫：每 3 秒出头一声——波纹和音符交替，从肚皮冒出来；
+        # 同时肚子抽一下（_sq 轻踢），静态图上是形变、exe 里能看出"叫"了
         if (self.hungry_amt.v > 0.3 and self.state == "idle"
                 and self.phase == "idle" and not self._pass):
             self._fx_timer2 -= dt
             if self._fx_timer2 <= 0:
-                self._fx_timer2 = 5.0
+                self._fx_timer2 = random.uniform(2.7, 3.7)
                 self._rumble_i += 1
                 kind = "note" if self._rumble_i % 2 else "rumble"
                 self.particles.append(Particle(
-                    kind, self.BCX + random.uniform(-26, 26),
-                    self.BCY - 36 + random.uniform(-6, 6), self.t))
+                    kind, self.BCX + random.uniform(-11, 11),
+                    self.BCY - 40 + random.uniform(-4, 4), self.t))
+                self._sq.kick(1.2)      # 位移峰值约 8%，读作肚子抽一下
 
         # 粒子物理
         alive = []
@@ -2565,8 +2589,16 @@ class EjeePet(QWidget):
             "pity": clamp(self._pity.v, 0.0, 1.0),        # 残渣显形度（表情复用 angry：怒眉+撇嘴）
             "alt": clamp(self.mouth_alt.v, 0.0, 1.0),     # 替代嘴形显形度
             "blink": self._blink_scale(),
+            "sigh": self._sigh_amt(),                    # 叹气包络 0..1
             "bw": self.bw, "bh": self.bh, "s2": self.s,
         }
+
+    def _sigh_amt(self):
+        """叹气包络 0..1：海市蜃楼破灭后轻轻塌一下再回来（约 1.25s）。"""
+        a = (self.t - self._sigh_t0) / self._sigh_dur
+        if a <= 0.0 or a >= 1.0:
+            return 0.0
+        return math.sin(math.pi * a) ** 0.72
 
     def _pose(self, f):
         """身体姿态：呼吸 / 摇摆 / 弹跳 / 颤抖 / 后仰（饥饿时起伏减半）。"""
@@ -2595,9 +2627,12 @@ class EjeePet(QWidget):
         # 强度由 _swim 弹簧淡入淡出，停下时自然回到纯呼吸
         swim = clamp(self._swim.v, 0.0, 1.0)
         bob -= 3.8 * swim * math.sin(self._swim_ph) ** 2
+        # 叹气：胸口一塌，整个身子往下坠一点（配合 _apply_body_pose 的压缩）
+        sigh = f["sigh"]
+        bob += 2.4 * sigh
         return {"breathe": breathe, "sway": sway, "bob": bob, "bounce": bounce,
                 "shake_x": shake_x, "shake_y": shake_y, "lean": lean,
-                "swim": swim}
+                "swim": swim, "sigh": sigh}
 
     def _draw_shadow(self, p, pose):
         """动态投影（画在身体组之下）：随离地高度（弹跳/浮动/拖拽）变大、
@@ -2618,7 +2653,8 @@ class EjeePet(QWidget):
         """把身体组的平移 / 旋转 / 挤压拉伸 / 朝向镜像写进 painter。"""
         p.translate(self.BCX + pose["shake_x"],
                     self.BCY + pose["bob"] + pose["bounce"] + pose["shake_y"]
-                    + f["ha"] * (4.5 - 3.2 * self._hover_amt.v))
+                    + f["ha"] * (3.4 - 2.4 * self._hover_amt.v)
+                    + pose["sigh"] * 2.6)
         p.rotate(pose["sway"] + pose["lean"] + self._tilt.v
                  + self._turn.v * self.facing)   # 转弯倾斜（乘 facing 抵消镜像）
         # 挤压拉伸（Squash & Stretch）：squash 弹簧 + 拖拽速度拉伸，
@@ -2629,8 +2665,13 @@ class EjeePet(QWidget):
         st = clamp(self._stuffed.v, 0.0, 1.0)     # 吃撑：肚子横向鼓起来
         # 傲娇躲避：不再做身体形变（改为直接闪现到别处），保持原比例
         shyk = 1.0
-        p.scale((1.0 + 0.008 * br + sq + dst) * (1.0 + 0.055 * st) * shyk,
-                (1.0 + 0.015 * br - sq - dst * 0.7) * (1.0 + 0.012 * st))
+        # 饿软了：以脚底（BCY，身体组原点）为支点纵向压扁，头顶往下塌
+        # ~34px，整只像一滩橘子水贴在地上；同时全身微微内收——轮廓自己
+        # 就瘪下去，比画阴影靠谱（暗斑在橙色圆脸上只会像脏）。叹气再补一点。
+        sag = 1.0 - 0.150 * f["ha"] - 0.055 * pose["sigh"]
+        p.scale((1.0 + 0.008 * br + sq + dst) * (1.0 + 0.055 * st) * shyk
+                * (1.0 - 0.028 * f["ha"] + 0.012 * pose["sigh"]),
+                (1.0 + 0.015 * br - sq - dst * 0.7) * (1.0 + 0.012 * st) * sag)
         # 朝向镜像：以身体竖直中轴翻转（眼/嘴/眉/尾巴全体自动跟随，
         # 气泡/倒计时牌/粒子在组外不受影响）
         if self.facing == -1:
@@ -2646,6 +2687,9 @@ class EjeePet(QWidget):
         p.drawPixmap(QRectF(-bpm.width() * k / 2.0, -bh,
                             bpm.width() * k, bpm.height() * k), bpm,
                      QRectF(0, 0, bpm.width(), bpm.height()))
+
+        # ---- 头顶叶子：单独一层，平时直立，饿了向一侧耷拉（见 _draw_leaf）----
+        self._draw_leaf(p, f)
 
         # ---- 尾巴轻摆：4 条水平条带，位移顶部 0（与融合区无缝衔接）
         #      -> 底部最大；幅度受慢波调制产生不规律感，随情绪微调 ----
@@ -2674,6 +2718,33 @@ class EjeePet(QWidget):
                     QRectF(0.0, ph * i / n, pw, ph / n))
             p.restore()
 
+    def _draw_leaf(self, p, f):
+        """头顶那片叶子：绕叶柄根部旋转。
+
+        平时（ha=0）就是原素材的姿态；越饿越向右倒（最高 56°，叶尖从
+        右上倒向右侧、微微压到头顶上），同时纵向缩一点、颜色从嫩绿转到
+        土黄（leaf.png 与 leaf_dry.png 按 ha 叠加），读作“蔫了/枯萎”。"""
+        ha = f["ha"]
+        lx, ly, lw, lh, ax, ay = LEAF_GEO
+        rect = QRectF(lx - self.BCX, ly - self.BCY, lw, lh)
+        axr, ayr = ax - self.BCX, ay - self.BCY
+        # 旋转轴在叶柄插入头皮的那一点，叶子绕它转，根部不裂缝；
+        # 再叠一点很慢的晃动，像挂不住了却还在勉强撑着
+        ang = ha * (66.0 + 2.6 * math.sin(self.t * 1.35))
+        p.save()
+        p.setOpacity(1.0 - 0.18 * ha)
+        p.translate(axr, ayr)
+        p.rotate(ang)
+        p.scale(1.0, 1.0 - 0.07 * ha)        # 萎软：沿叶脉方向缩短
+        p.translate(-axr, -ayr)
+        lp = self._cache_pm("leaf", self.leaf_pm, self._dev_px(lw))
+        p.drawPixmap(rect, lp, QRectF(lp.rect()))
+        if ha > 0.02:                        # 枯色叠层：嫩绿 -> 土黄
+            dp = self._cache_pm("leaf_dry", self.leaf_dry_pm, self._dev_px(lw))
+            p.setOpacity(ha * 0.92)
+            p.drawPixmap(rect, dp, QRectF(dp.rect()))
+        p.restore()
+
     def _draw_eyes(self, p, f):
         """眼睛：精灵变形 + 表情眼（眯眼弧 ∩ / 睡眠闭眼 ︶ / 泪花 /
         ＞＜ 坏笑 / 怒容眉与眼周阴影）。坐标均为身体组内的相对设计坐标。"""
@@ -2684,7 +2755,7 @@ class EjeePet(QWidget):
         # 腮红（生气/委屈时随 puff 渐显）：双眼下方偏外侧两团暖红。
         # 用多层同心椭圆叠出柔边 —— QRadialGradient 是正圆，映射到扁椭圆
         # 时会在边缘留下硬边，实色多层的台阶在这么大尺度上看不出来。
-        bk = clamp(c["puff"], 0.0, 1.0)
+        bk = clamp(c["puff"], 0.0, 1.0) * (1.0 - 0.85 * ha)
         if bk > 0.03:
             p.save()
             p.setOpacity(bk)
@@ -2722,8 +2793,8 @@ class EjeePet(QWidget):
                             + ha * 2.2)
                 p.rotate(rot_dir * c["eye_rot"])
                 p.scale(c["eye_sx"] * (1.0 + 0.06 * ha) * (1.0 + 0.05 * nrv),
-                        c["eye_sy"] * (1.0 - 0.22 * ha) * max(0.05, blink)
-                        * (1.0 + 0.04 * nrv))
+                        c["eye_sy"] * (1.0 - 0.10 * ha) * max(0.05, blink)
+                        * (1.0 + 0.04 * nrv) * (1.0 - 0.30 * f["sigh"]))
                 p.drawPixmap(QRectF(-ew / 2, -eh / 2, ew, eh), epm,
                              QRectF(0, 0, epm.width(), epm.height()))
                 p.restore()
@@ -2753,25 +2824,8 @@ class EjeePet(QWidget):
                 p.drawArc(QRectF(ex - aw, ey + c["eye_dy"] - ah,
                                  2 * aw, 2 * ah), 180 * 16, 180 * 16)
             p.restore()
-        # 可怜泪花：饥饿时下内眼角挂着泪珠（ha 渐显，非睡眠/惊讶/生气期间）
-        if (ha > 0.25 and sa < 0.5 and ma < 0.3
-                and clamp(self.mouth_alt.v, 0.0, 1.0) < 0.5):
-            p.save()
-            p.setOpacity(ha * 0.95)
-            p.setPen(Qt.NoPen)
-            for key, sgn in (("eye_l", 1), ("eye_r", -1)):
-                ex, ey, ew, eh = self.eye_pos[key]
-                ex -= self.BCX
-                ey -= self.BCY
-                tx = ex + sgn * ew * 0.26      # 内眼角（朝鼻侧）
-                ty = ey + eh * 0.30            # 下眼缘
-                tw = ew * 0.10
-                p.setBrush(QColor(170, 210, 238, 228))
-                self._teardrop(p, tx, ty, tw, tw * 1.7)
-                p.setBrush(QColor(255, 255, 255, 175))
-                p.drawEllipse(QPointF(tx - tw * 0.10, ty + tw * 0.25),
-                              tw * 0.13, tw * 0.18)
-            p.restore()
+        # （原「可怜泪花」已删除：泪珠读作委屈/快哭，和“饿瘪了”的语义打架。
+        #   饥饿层现在只留：压扁的眼睛、波浪嘴、嘴角口水。）
         # 恶作剧坏笑眼：＞＜ 折线（双眼向中间挤成 V 形，精灵同步淡出）
         if ma > 0.02 and sa < 0.5:
             p.save()
@@ -2900,7 +2954,7 @@ class EjeePet(QWidget):
 
     def _draw_mouth(self, p, f):
         """嘴：ω 精灵 + 各表情嘴（张嘴笑 / 吐舌 / 生气撇嘴 + 人中 / 睡眠圆嘴 /
-        饥饿瘪嘴+口水+脸颊凹陷 / 恶作剧坏笑+舌头）。"""
+        饥饿波浪嘴 + 口水 / 恶作剧坏笑 + 舌头）。"""
         bw, bh, s2 = f["bw"], f["bh"], f["s2"]
         sa, ma, ha = f["sa"], f["ma"], f["ha"]
         # 可怜层（面包掉地上）：表情与 angry 一致，这里把生气撇嘴也画出来
@@ -3027,34 +3081,36 @@ class EjeePet(QWidget):
                           mw * 0.13, mh * 0.30)
             p.setOpacity(1.0)
         if ha > 0.005 and sa < 0.5 and alt < 0.5 and ma < 0.3:
-            # 饥饿瘪嘴：ω 微张成小圆洞 + 嘴角向下撇 + 右嘴角口水滴
+            # 饥饿波浪嘴：一条上下起伏的小波浪（4 段），比小圆洞更像
+            # "饿得没力气、嘴都撑不住了"。ω 已按 ha 淡出，整条嘴自绘。
             p.setOpacity(ha)
+            w = mw * 0.68
+            y0 = mcy + mh * 0.13 + f["sigh"] * mh * 0.10
+            amp = mh * 0.105
+            seg = 4
+            path = QPainterPath()
+            path.moveTo(mcx - w / 2, y0 - amp * 0.35)
+            # 段间用二次曲线交替上下，端点略收（波浪的“两端翘、中间塌”）
+            for i in range(seg):
+                x1 = mcx - w / 2 + w * (i + 0.5) / seg
+                x2 = mcx - w / 2 + w * (i + 1.0) / seg
+                dy = amp if i % 2 == 0 else -amp
+                path.quadTo(QPointF(x1, y0 + dy), QPointF(x2, y0))
             p.setPen(QPen(QBrush(QColor(OMEGA_COL)), 4.6, Qt.SolidLine,
                           Qt.RoundCap, Qt.RoundJoin))
             p.setBrush(Qt.NoBrush)
-            rx, ry = mw * 0.115, mh * 0.24
-            my_ = mcy + mh * 0.08
-            p.drawEllipse(QPointF(mcx, my_), rx, ry)      # 瘪瘪小圆洞
+            p.drawPath(path)
             # 口水：透明浅蓝小水滴挂在右嘴角，随时间轻微拉长（摇摇欲坠）
-            p.setOpacity(ha * 0.85)
+            p.setOpacity(ha * 0.80)
             p.setPen(Qt.NoPen)
-            p.setBrush(QColor(185, 220, 242, 205))
-            dh = mh * (0.20 + 0.05 * math.sin(self.t * 1.9))
-            self._teardrop(p, mcx + rx + 1.5, my_ + ry - 2 + dh * 0.55,
-                           mw * 0.05, dh)
+            p.setBrush(QColor(176, 216, 244, 222))
+            dh = mh * (0.22 + 0.05 * math.sin(self.t * 1.9))
+            self._teardrop(p, mcx + w * 0.46, y0 + amp * 0.35 + dh * 0.42,
+                           mw * 0.062, dh)
             p.setOpacity(1.0)
-        if ha > 0.05 and sa < 0.5 and alt < 0.5 and ma < 0.3:
-            # 脸颊凹陷：饿瘪了的软阴影（径向渐变，中心略深边缘透明）
-            p.save()
-            p.setOpacity(ha)
-            p.setPen(Qt.NoPen)
-            for sgn in (-1, 1):
-                g = QRadialGradient(QPointF(sgn * 46, -38), 24)
-                g.setColorAt(0.0, QColor(196, 158, 124, 110))
-                g.setColorAt(1.0, QColor(196, 158, 124, 0))
-                p.setBrush(QBrush(g))
-                p.drawEllipse(QPointF(sgn * 46, -38), 24, 15)
-            p.restore()
+        # （原「脸颊凹陷深棕渐变」和「脸颊暗带」两版都删掉了：在橙色圆脸上
+        #   无论怎么调都读成脏斑/竖纹。饿瘪改用几何做——见 _apply_body_pose
+        #   里的 sag：以脚底为支点压扁 + 全身微微内收，轮廓自己就瘪了。）
         if ma > 0.02 and sa < 0.5 and alt < 0.5:
             # 恶作剧吐舌头：单边翘起的坏笑弧 + 探出来的粉舌头
             p.setOpacity(ma)
@@ -3119,9 +3175,13 @@ class EjeePet(QWidget):
                 fsc = 1.0 + 0.22 * k3
             if fa > 0.01:
                 p.save()
-                p.setOpacity(fa)
+                p.setOpacity(fa * 0.96)
                 p.translate(58, -294 + 1.2 * math.sin(t * 1.7))  # 轻飘
-                p.scale(fsc, fsc)
+                # "极小"：整体再收 0.78；海市蜃楼本来就该是若有若无的一小团
+                p.scale(fsc * 0.78, fsc * 0.78)
+                # （"啵"的扩散环画不出来：云瓣半径 18.6、环只能到 22，几乎
+                #   整圈都躲在云后面。破灭感交给「云猛放大 + 急速淡出」和
+                #   _tick 里喷出的 4 颗 bubble 碎屑。）
                 # 云朵：底圆 + 六瓣圆并集，一条干净轮廓（与对话气泡同画风）
                 cloud = QPainterPath()
                 cloud.addEllipse(QPointF(0, 0), 19, 14)
@@ -3138,39 +3198,64 @@ class EjeePet(QWidget):
                 p.translate(1.8, 2.6)
                 p.drawPath(cloud)
                 p.restore()
-                p.setPen(QPen(QColor("#E8A259"), 2.0, Qt.SolidLine,
+                p.setPen(QPen(QColor("#E8A259"), 1.8, Qt.SolidLine,
                               Qt.RoundCap, Qt.RoundJoin))
-                p.setBrush(QColor(255, 251, 243, 244))
+                p.setBrush(QColor(255, 252, 245, 246))
                 p.drawPath(cloud)
                 # 意念泡小尾：两枚渐小的圆，斜垂向头顶
                 for (tx_, ty_, tr_) in ((6.5, 18.5, 4.4), (1.5, 26, 2.9)):
                     p.setPen(QPen(QColor("#E8A259"), 1.9))
                     p.setBrush(QColor(255, 251, 243, 244))
                     p.drawEllipse(QPointF(tx_, ty_), tr_, tr_)
-                # 牛奶面包：圆顶面包体 + 三道弯割痕 + 左上高光
-                p.setPen(QPen(QColor("#C08A4E"), 1.9, Qt.SolidLine,
+                # 牛奶吐司：方形面包片（顶部两瓣圆肩）+ 焦黄烤边 + 一块黄油
+                p.setPen(QPen(QColor("#C08A4E"), 1.8, Qt.SolidLine,
                               Qt.RoundCap, Qt.RoundJoin))
-                p.setBrush(QColor(251, 227, 186))
-                loaf = QPainterPath()
-                loaf.moveTo(-11.5, 5.5)
-                loaf.cubicTo(-13.5, -2.5, -8.5, -8.5, 0, -8.5)
-                loaf.cubicTo(8.5, -8.5, 13.5, -2.5, 11.5, 5.5)
-                loaf.quadTo(0, 9.5, -11.5, 5.5)
-                p.drawPath(loaf)
-                p.setPen(QPen(QColor("#B4793E"), 1.7, Qt.SolidLine,
+                p.setBrush(QColor(253, 235, 198))
+                tx = 10.4
+                toast = QPainterPath()
+                toast.moveTo(-tx, 6.2)
+                toast.quadTo(-tx, 7.6, -tx + 1.6, 7.6)
+                toast.lineTo(tx - 1.6, 7.6)
+                toast.quadTo(tx, 7.6, tx, 6.2)
+                toast.lineTo(tx, -1.4)
+                toast.cubicTo(tx, -5.6, tx * 0.52, -7.6, 0, -7.6)
+                toast.cubicTo(-tx * 0.52, -7.6, -tx, -5.6, -tx, -1.4)
+                toast.closeSubpath()
+                p.drawPath(toast)
+                # 烤皮：沿吐司肩线压一条偏厚的焦黄边
+                p.setPen(QPen(QColor("#DFA968"), 2.4, Qt.SolidLine,
                               Qt.RoundCap))
-                for sx in (-6.6, -0.6, 5.4):
-                    cut = QPainterPath()
-                    cut.moveTo(sx, -4.6)
-                    cut.quadTo(sx + 1.4, -1.0, sx + 3.4, 1.6)
-                    p.drawPath(cut)
-                p.setPen(QPen(QColor(255, 255, 255, 150), 1.9,
-                              Qt.SolidLine, Qt.RoundCap))
-                hl = QPainterPath()
-                hl.moveTo(-7.6, -4.4)
-                hl.quadTo(-5.4, -7.2, -1.6, -7.6)
-                p.drawPath(hl)
-                # 闪光：面包右上角的小四角星，明暗闪烁
+                crust = QPainterPath()
+                crust.moveTo(-tx + 1.2, -1.8)
+                crust.cubicTo(-tx + 0.8, -5.0, -tx * 0.5, -6.4, 0, -6.4)
+                crust.cubicTo(tx * 0.5, -6.4, tx - 0.8, -5.0, tx - 1.2, -1.8)
+                p.drawPath(crust)
+                # 黄油：中间一小块 + 一道窄高光
+                p.setPen(Qt.NoPen)
+                p.setBrush(QColor(247, 205, 114))
+                p.drawRoundedRect(QRectF(-4.2, -3.9, 8.4, 5.0), 1.3, 1.3)
+                p.setBrush(QColor(255, 235, 176, 190))
+                p.drawRoundedRect(QRectF(-3.4, -3.4, 4.6, 1.4), 0.6, 0.6)
+                # 热气：三缕细汽从吐司顶端往上冒、穿出云层（白色画在白云上
+                # 等于没有，所以用带一点暖灰的雾色，并且在云外也能看到）
+                p.setBrush(Qt.NoBrush)
+                for k in range(3):
+                    ph = t * 1.9 + k * 1.7
+                    hx = -5.6 + 5.6 * k
+                    a_ = int(96 + 58 * math.sin(ph * 1.3))
+                    if a_ <= 6:
+                        continue
+                    p.setPen(QPen(QColor(202, 184, 164, a_), 1.8,
+                                  Qt.SolidLine, Qt.RoundCap))
+                    yy = -7.2 - 1.0 * math.sin(ph * 0.7)
+                    st = QPainterPath()
+                    st.moveTo(hx, yy)
+                    st.cubicTo(hx - 2.4, yy - 2.8, hx + 2.6, yy - 5.0,
+                               hx - 0.5, yy - 7.4)
+                    st.cubicTo(hx - 2.2, yy - 9.0, hx + 1.2, yy - 9.6,
+                               hx + 0.6, yy - 10.4)
+                    p.drawPath(st)
+                # 闪光：吐司右上角的小四角星，明暗闪烁
                 tw_ = 0.55 + 0.45 * math.sin(t * 4.6)
                 p.setPen(QPen(QColor(255, 218, 140, int(225 * tw_)), 1.6,
                               Qt.SolidLine, Qt.RoundCap))
@@ -3703,7 +3788,7 @@ class EjeePet(QWidget):
                 wob = math.sin(age * 6.0 + pt.rot) * 1.6
                 p.translate(wob, 0)
                 p.scale(sc2, sc2)
-                p.setPen(QPen(QColor(172, 190, 214, int(205 * a)), 2.4,
+                p.setPen(QPen(QColor(255, 248, 236, int(215 * a)), 2.4,
                               Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
                 p.setBrush(Qt.NoBrush)
                 for row, half in ((0.0, 1.0), (7.5, -1.0)):
@@ -3713,7 +3798,7 @@ class EjeePet(QWidget):
                     wv.quadTo(5.5, row + 4.5 * half, 11, row)
                     p.drawPath(wv)
                 p.setPen(Qt.NoPen)
-                p.setBrush(QColor(172, 190, 214, int(165 * a)))
+                p.setBrush(QColor(255, 248, 236, int(180 * a)))
                 p.drawEllipse(QPointF(15.5, -7.5), 1.9, 1.9)
                 p.drawEllipse(QPointF(-15.5, -9.5), 1.5, 1.5)
                 p.setBrush(Qt.NoBrush)
@@ -3725,7 +3810,7 @@ class EjeePet(QWidget):
                 p.translate(wob, 0)
                 p.rotate(-12)
                 p.scale(sc2, sc2)
-                col = QColor(172, 190, 214, int(210 * a))
+                col = QColor(255, 248, 236, int(222 * a))
                 p.setPen(Qt.NoPen)
                 p.setBrush(col)
                 p.drawEllipse(QPointF(-3.2, 6.5), 4.0, 3.1)        # 符头
@@ -4881,10 +4966,12 @@ def main():
                                       pet.BCY - 130, pet.t - 0.5))
         pet.particles.append(Particle("sweat", pet.BCX + 70,
                                       pet.BCY - 124, pet.t - 0.2))
-        pet.particles.append(Particle("note", pet.BCX + 30,
-                                      pet.BCY - 44, pet.t - 0.6))
+        pet.particles.append(Particle("note", pet.BCX + 34,
+                                      pet.BCY - 40, pet.t - 0.6))
         pet.grab().save(os.path.join(PREVIEW_DIR, "preview_hungry.png"))
         snap("mischief")
+        pet.hungry_amt.snap(0.0)      # 恶作剧预览回到正常体型（不然还是软趴的）
+        pet._meta["hunger"] = 80.0
         pet.mischief_amt.snap(1.0)
         pet._mis_tail.snap(0.85)
         pet._mis_dir = 1.0

@@ -2704,9 +2704,11 @@ class EjeePet(QWidget):
             if wk < 0.995:
                 epm = self._cache_pm(key, pm, self._dev_px(ew))
                 p.save()
-                # 晕车不再把眼睛藏起来：蚊香就画在原瞳孔上（见
-                # _draw_dizzy_eyes），眼型轮廓留着才像"这个角色的眼睛"
-                p.setOpacity((1.0 - wk) * (1.0 - sa) * (1.0 - ma))
+                # 晕车时精灵整个淡出，脸上只留眩晕蚊香（见
+                # _draw_dizzy_eyes）——精灵 + 瞳孔蚊香叠一起会变成
+                # "黑圈套白蚊香"的风镜，两层结构反而最不自然
+                p.setOpacity((1.0 - wk) * (1.0 - sa) * (1.0 - ma)
+                             * (1.0 - dz))
                 p.translate(ex + gaze[0] * self.facing * 3.5 * (1.0 + 0.9 * ha),
                             ey + c["eye_dy"] + gaze[1] * 2.5 * (1.0 + 0.9 * ha)
                             + ha * 2.2)
@@ -2813,29 +2815,33 @@ class EjeePet(QWidget):
             p.restore()
 
     def _draw_dizzy_eyes(self, p, c, gaze, dz):
-        """晕车蚊香圈眼：瞳孔里转起一团蚊香，两眼反向转。
+        """晕车蚊香圈眼：不画任何眼睛底图，只在原眼位上一对深棕蚊香。
 
-        刻意不铺"白色圆饼 + 粗蚊香"那套图标画法——那会把角色的眼睛整个
-        换掉，脸上一对白圆看着像贴纸。这里精灵原样留着（深棕眼珠 + 奶油
-        高光 + 黄月牙都在），蚊香直接画在瞳孔上：外疏内紧、二次曲线平滑，
-        线色取偏暖的米白而不是纯白，好跟素材里那道白色高光分出色阶。
+        弯路记一笔：先试过"精灵保留 + 瞳孔上画米白蚊香"，也试过"白圆饼 +
+        深棕蚊香"——前者是深色大眼圈里再套一圈白螺旋，远看像戴了风镜；
+        后者干脆把角色眼睛换成图标。最后确定**底图全撤**：底图眼洞本来就是
+        修补成皮肤的，撤掉后是干净的橙色脸颊，一对蚊香直接落在脸上，才是最
+        经典的晕眩画法。
+        尺寸取 0.46 眼宽（≈ 原眼径），太小会显得脸空、像随手涂的圈；线色用
+        比眼珠深棕浅一档的 (86,58,42)，比纯黑柔和、又不至于淡成花纹。
+        两眼反向旋转，一笔螺旋外圈起笔、向内收细。
         """
         p.save()
         p.setOpacity(dz)
+        col = QColor(86, 58, 42)
         for key, spin in (("eye_l", 1.0), ("eye_r", -1.0)):
             ex, ey, ew, eh = self.eye_pos[key]
             ex -= self.BCX
             ey -= self.BCY
-            # 瞳孔中心比精灵中心略偏右上（素材月牙偏左，眼珠因此偏右）
-            cx = ex + gaze[0] * self.facing * 3.5 * 0.3 + ew * 0.045
-            cy = ey + c["eye_dy"] - eh * 0.025
+            cx = ex + gaze[0] * self.facing * 3.5 * 0.3
+            cy = ey + c["eye_dy"]
             base_a = self.t * 2.1 * spin
-            rad0, rad1 = ew * 0.245, ew * 0.032
-            N = 46
+            rad0, rad1 = ew * 0.46, ew * 0.034
+            N = 52
             pts = []
             for k in range(N + 1):
                 u = k / N
-                aa = base_a + u * 2.15 * math.tau
+                aa = base_a + u * 2.4 * math.tau
                 rad = rad0 + (rad1 - rad0) * u
                 pts.append(QPointF(cx + math.cos(aa) * rad,
                                    cy + math.sin(aa) * rad * 0.96))
@@ -2846,8 +2852,8 @@ class EjeePet(QWidget):
                             QPointF((pts[i].x() + pts[i + 1].x()) * 0.5,
                                     (pts[i].y() + pts[i + 1].y()) * 0.5))
             path.lineTo(pts[N])
-            p.setPen(QPen(QColor(244, 232, 202, 250), max(2.0, ew * 0.040),
-                          Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+            p.setPen(QPen(col, max(2.0, ew * 0.052), Qt.SolidLine,
+                          Qt.RoundCap, Qt.RoundJoin))
             p.setBrush(Qt.NoBrush)
             p.drawPath(path)
         p.restore()

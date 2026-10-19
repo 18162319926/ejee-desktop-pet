@@ -37,10 +37,11 @@ EJEE（伊吉）桌面宠物 —— 功能说明
                 醒来时泡泡"啵"地破成一圈小泡泡
    两层「叠加式」表情图层，可与上面任意状态共存：
      · 饥饿层（饱食度 < 30，hungry_amt）：全身以脚底为支点压扁 15%（软趴），
-      叶子向一侧耷拉转枯，波浪嘴 + 口水，每 3 秒咕咕叫，每 10 秒头顶飘一朵
-      海市蜃楼（云里的牛奶吐司 + 热气）2 秒后啵地破灭，跟着叹一口气
-       + 泪花 + 汗滴 + 肚子咕咕声波/音符 + 头顶面包幻想气泡（2s 后"啵"地破灭）
-       + 身体下沉、尾巴无力、悬停时努力抬头；此期间不再触发惊讶/庆祝/散步
+      叶子只枯萎转土黄（不耷拉），波浪嘴 + 口水，肚子每隔几秒咕咕叫
+      （肚皮冒出 1~2 组半透明黄色同心圆声波 + 肚子抽一下），每 10 秒
+      头顶飘一朵海市蜃楼（云里的牛奶吐司 + 热气）2 秒后啵地破灭，
+      跟着叹一口气 + 头顶面包幻想气泡（2s 后"啵"地破灭）
+      + 身体下沉、尾巴无力、悬停时努力抬头；此期间不再触发惊讶/庆祝/散步
      · 睡眠层（sleep_amt）：闭眼弧与 ω 嘴 ⇄ 小圆嘴的交叉渐显
      · 可怜层（屏幕上有面包渣，_pity）：视线锁定残渣 + 表情复用 angry
        （倒 V 怒眉 + 生气撇嘴 + 人中小竖线；原委屈眼上眼穹顶已删除）
@@ -555,23 +556,14 @@ class Particle:
             self.color = QColor(150, 170, 200)
             self.size = random.uniform(9, 14)
             self.life = random.uniform(2.4, 3.2)
-        elif kind == "sweat":
-            # 饥饿汗滴：从太阳穴缓缓滑落，轻微外斜
-            self.vx = random.uniform(-5, 5)
-            self.vy = random.uniform(16, 30)
-            self.rot = random.uniform(-0.22, 0.22)   # 用作倾斜角（弧度）
-            self.vr = 0.0
-            self.color = QColor(158, 205, 235)
-            self.size = random.uniform(4.4, 6.4)
-            self.life = random.uniform(1.0, 1.4)
-        elif kind in ("rumble", "note"):
-            # 肚子咕咕叫：从肚皮冒出的声波纹/音符，缓慢上浮
+        elif kind == "rumble":
+            # 肚子咕咕叫：从肚皮冒出的半透明黄色同心圆声波，缓慢上浮
             self.vx = random.uniform(-3, 3)
-            self.vy = random.uniform(-14, -9)
+            self.vy = random.uniform(-11, -6)
             self.rot = random.uniform(0, 6.28)   # 用作摆动相位
             self.vr = 0.0
-            self.color = QColor(172, 190, 214)
-            self.size = random.uniform(0.9, 1.1)  # 缩放系数
+            self.color = QColor(246, 200, 92)    # 声波黄（绘制时再按扩散渐隐）
+            self.size = random.uniform(9.0, 13.0)  # 基准半径（设计 px）
             self.life = random.uniform(1.5, 1.9)
         else:  # steam
             self.vx = random.uniform(-8, 8)
@@ -1397,7 +1389,7 @@ class EjeePet(QWidget):
         self._tilt = Spring(0.0, 120, 14)     # 拖拽方向倾斜
         self.mouth_alt = Spring(0.0, 110, 13)  # 替代嘴形显形度 0..1（0=ω 原嘴）
         self.sleep_amt = Spring(0.0, 110, 13)  # 睡眠表情显形度 0..1（闭眼弧+小圆嘴）
-        self.hungry_amt = Spring(0.0, 90, 12)  # 饥饿表情显形度 0..1（垂眼+波浪嘴+汗）
+        self.hungry_amt = Spring(0.0, 90, 12)  # 饥饿表情显形度 0..1（垂眼+波浪嘴+身体萎软）
         self.mischief_amt = Spring(0.0, 120, 13)  # 恶作剧表情显形度 0..1
         self.mischief_until = 0.0     # 恶作剧结束时刻（最高优先级状态）
         self._mis_tail = Spring(0.0, 90, 11)  # 尾巴甩动量（触发 snap(1) 自然衰减）
@@ -1415,7 +1407,6 @@ class EjeePet(QWidget):
         self._hover_amt = Spring(0.0, 70, 12)  # 悬停抬头量（饿了看到鼠标努力抬头）
         self._breathe_ph = random.uniform(0.0, 6.28)   # 呼吸相位累积器（可变速）
         self._tail_ph = random.uniform(0.0, 6.28)      # 尾摆相位累积器（可变速）
-        self._rumble_i = 0           # 咕咕叫轮次（波浪/音符交替）
         self._fantasy = None         # 幻想气泡 {"t0": 开始时刻}
         self._next_fantasy = random.uniform(5.0, 8.0)
         # 叹气：每次海市蜃楼破灭后来一下（身体一沉 + 眼睛半闭）
@@ -2269,7 +2260,7 @@ class EjeePet(QWidget):
             self.floats.append(("啵～", self.BCX + 52, self.head_top - 4,
                                 self.t))
         self._sleeping_prev = self.state == "sleep"
-        # 饥饿表情图层：饱食度 <30 渐显（垂眼/虚弱波浪嘴/汗滴）
+        # 饥饿表情图层：饱食度 <30 渐显（垂眼/虚弱波浪嘴/叶子枯萎）
         self.hungry_amt.step(
             1.0 if self._meta.get("hunger", 100.0) < 30.0 else 0.0, dt)
         # 恶作剧：表情显形弹簧（1.5s 内 1→0 自动回落）+ 尾巴甩动衰减 + 蓄力弹开
@@ -2442,29 +2433,18 @@ class EjeePet(QWidget):
                     "zzz", self.BCX + random.uniform(30, 56),
                     self.head_top + random.uniform(-2, 10), self.t))
 
-        # 饥饿汗滴：饿肚子时头侧冒汗（弱弱的感觉），与 zzz/蒸汽共用计时器
-        if (self.hungry_amt.v > 0.6 and self.state == "idle"
-                and self.phase == "idle" and not self._pass):
-            self._fx_timer -= dt
-            if self._fx_timer <= 0:
-                self._fx_timer = random.uniform(2.6, 4.0)
-                self.particles.append(Particle(
-                    "sweat", self.BCX + random.choice((-1, 1))
-                    * random.uniform(56, 76),
-                    self.BCY - 132 + random.uniform(-8, 8), self.t))
-
-        # 肚子咕咕叫：每 3 秒出头一声——波纹和音符交替，从肚皮冒出来；
-        # 同时肚子抽一下（_sq 轻踢），静态图上是形变、exe 里能看出"叫"了
+        # 肚子咕咕叫：每隔几秒一声——肚皮位置冒出 1~2 组半透明黄色
+        # 同心圆声波，同时肚子抽一下（_sq 轻踢）
         if (self.hungry_amt.v > 0.3 and self.state == "idle"
                 and self.phase == "idle" and not self._pass):
             self._fx_timer2 -= dt
             if self._fx_timer2 <= 0:
                 self._fx_timer2 = random.uniform(2.7, 3.7)
-                self._rumble_i += 1
-                kind = "note" if self._rumble_i % 2 else "rumble"
-                self.particles.append(Particle(
-                    kind, self.BCX + random.uniform(-11, 11),
-                    self.BCY - 40 + random.uniform(-4, 4), self.t))
+                for i in range(random.choice((1, 2))):
+                    self.particles.append(Particle(
+                        "rumble", self.BCX + random.uniform(-16, 16),
+                        self.BCY - 34 + random.uniform(-7, 7),
+                        self.t - i * random.uniform(0.12, 0.30)))
                 self._sq.kick(1.2)      # 位移峰值约 8%，读作肚子抽一下
 
         # 粒子物理
@@ -2688,7 +2668,7 @@ class EjeePet(QWidget):
                             bpm.width() * k, bpm.height() * k), bpm,
                      QRectF(0, 0, bpm.width(), bpm.height()))
 
-        # ---- 头顶叶子：单独一层，平时直立，饿了向一侧耷拉（见 _draw_leaf）----
+        # ---- 头顶叶子：单独一层，平时直立；饿了只枯萎、不耷拉（见 _draw_leaf）----
         self._draw_leaf(p, f)
 
         # ---- 尾巴轻摆：4 条水平条带，位移顶部 0（与融合区无缝衔接）
@@ -2719,22 +2699,19 @@ class EjeePet(QWidget):
             p.restore()
 
     def _draw_leaf(self, p, f):
-        """头顶那片叶子：绕叶柄根部旋转。
+        """头顶那片叶子：只枯萎，不耷拉。
 
-        平时（ha=0）就是原素材的姿态；越饿越向右倒（最高 56°，叶尖从
-        右上倒向右侧、微微压到头顶上），同时纵向缩一点、颜色从嫩绿转到
-        土黄（leaf.png 与 leaf_dry.png 按 ha 叠加），读作“蔫了/枯萎”。"""
+        平时（ha=0）就是原素材的直立姿态；越饿只做两件事：沿叶脉方向
+        缩短一点点（萎软），颜色从嫩绿叠到土黄（leaf.png 与 leaf_dry.png
+        按 ha 叠加），读作“蔫了/枯萎”。不再绕叶柄旋转倒向一侧。"""
         ha = f["ha"]
         lx, ly, lw, lh, ax, ay = LEAF_GEO
         rect = QRectF(lx - self.BCX, ly - self.BCY, lw, lh)
         axr, ayr = ax - self.BCX, ay - self.BCY
-        # 旋转轴在叶柄插入头皮的那一点，叶子绕它转，根部不裂缝；
-        # 再叠一点很慢的晃动，像挂不住了却还在勉强撑着
-        ang = ha * (66.0 + 2.6 * math.sin(self.t * 1.35))
+        # 不旋转（用户：不要耷拉，只枯萎）；以叶柄根部为支点纵向缩短
         p.save()
         p.setOpacity(1.0 - 0.18 * ha)
         p.translate(axr, ayr)
-        p.rotate(ang)
         p.scale(1.0, 1.0 - 0.07 * ha)        # 萎软：沿叶脉方向缩短
         p.translate(-axr, -ayr)
         lp = self._cache_pm("leaf", self.leaf_pm, self._dev_px(lw))
@@ -3771,57 +3748,30 @@ class EjeePet(QWidget):
                 p.drawLine(QPointF(wob - hw, sz * 0.55),
                            QPointF(wob + hw, sz * 0.55))
                 p.setPen(Qt.NoPen)
-            elif pt.kind == "sweat":
-                # 汗滴：尖顶圆底（复用泪滴形），缓缓下滑渐隐
-                r = pt.size * (0.85 + 0.3 * min(1.0, age))
-                p.rotate(math.degrees(pt.rot))
-                p.setPen(Qt.NoPen)
-                p.setBrush(QColor(158, 205, 235, int(205 * a)))
-                self._teardrop(p, 0, 0, r * 1.6, r * 2.0)
-                p.setBrush(QColor(255, 255, 255, int(150 * a)))
-                p.drawEllipse(QPointF(-r * 0.12, r * 0.05), r * 0.15, r * 0.2)
-                p.setBrush(Qt.NoBrush)
             elif pt.kind == "rumble":
-                # 咕咕叫声波：两道波浪纹 + 小圆点，从肚皮冒出上浮
-                k2 = min(1.0, age / 0.35)
-                sc2 = (0.6 + 0.4 * k2) * pt.size
-                wob = math.sin(age * 6.0 + pt.rot) * 1.6
+                # 肚子咕咕叫：肚皮冒出半透明黄色同心圆声波——三圈错相出发、
+                # 半径持续扩散、越扩越淡，缓慢上浮，读作"咕咕叫了一声"。
+                # 每圈画两遍：宽而极淡的光晕 + 窄而实的芯线，在橘色肚皮上
+                # 才读得出来（单细线会被底色吃掉）
+                wob = math.sin(age * 5.0 + pt.rot) * 1.4
                 p.translate(wob, 0)
-                p.scale(sc2, sc2)
-                p.setPen(QPen(QColor(255, 248, 236, int(215 * a)), 2.4,
-                              Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
-                p.setBrush(Qt.NoBrush)
-                for row, half in ((0.0, 1.0), (7.5, -1.0)):
-                    wv = QPainterPath()
-                    wv.moveTo(-11, row)
-                    wv.quadTo(-5.5, row - 4.5 * half, 0, row)
-                    wv.quadTo(5.5, row + 4.5 * half, 11, row)
-                    p.drawPath(wv)
+                for i in range(3):
+                    d0 = i * 0.19                      # 三圈错相出发
+                    u = clamp((age - d0) / (pt.life - d0), 0.0, 1.0)
+                    if u <= 0.0:
+                        continue
+                    rr = pt.size * (0.30 + 1.30 * u)   # 半径持续扩散
+                    al = a * (1.0 - u) ** 0.95
+                    if al < 0.012:
+                        continue
+                    p.setBrush(Qt.NoBrush)
+                    p.setPen(QPen(QColor(252, 216, 108, int(al * 0.20 * 255)),
+                                  6.5, Qt.SolidLine, Qt.RoundCap))
+                    p.drawEllipse(QPointF(0.0, 0.0), rr, rr)
+                    p.setPen(QPen(QColor(252, 216, 108, int(al * 0.88 * 255)),
+                                  2.8, Qt.SolidLine, Qt.RoundCap))
+                    p.drawEllipse(QPointF(0.0, 0.0), rr, rr)
                 p.setPen(Qt.NoPen)
-                p.setBrush(QColor(255, 248, 236, int(180 * a)))
-                p.drawEllipse(QPointF(15.5, -7.5), 1.9, 1.9)
-                p.drawEllipse(QPointF(-15.5, -9.5), 1.5, 1.5)
-                p.setBrush(Qt.NoBrush)
-            elif pt.kind == "note":
-                # 音符 ♪：符头 + 符干 + 小旗，从肚皮飘出表示肚子在唱歌
-                k2 = min(1.0, age / 0.3)
-                sc2 = (0.6 + 0.4 * k2) * pt.size
-                wob = math.sin(age * 5.0 + pt.rot) * 1.5
-                p.translate(wob, 0)
-                p.rotate(-12)
-                p.scale(sc2, sc2)
-                col = QColor(255, 248, 236, int(222 * a))
-                p.setPen(Qt.NoPen)
-                p.setBrush(col)
-                p.drawEllipse(QPointF(-3.2, 6.5), 4.0, 3.1)        # 符头
-                p.setPen(QPen(col, 2.2, Qt.SolidLine, Qt.RoundCap))
-                p.drawLine(QPointF(0.6, 6.0), QPointF(0.6, -8.5))  # 符干
-                p.setPen(Qt.NoPen)
-                flag = QPainterPath()
-                flag.moveTo(0.6, -8.5)
-                flag.quadTo(8.0, -6.0, 5.2, 1.0)
-                flag.quadTo(6.4, -4.5, 0.6, -3.5)
-                p.drawPath(flag)                                   # 小旗
                 p.setBrush(Qt.NoBrush)
             elif pt.kind == "heart":
                 sz = pt.size
@@ -4962,12 +4912,10 @@ def main():
         pet.t = 10.6
         pet._last_t = 10.6
         pet._fantasy = {"t0": pet.t - 0.9}    # 幻想气泡（展示期）
-        pet.particles.append(Particle("sweat", pet.BCX - 64,
-                                      pet.BCY - 130, pet.t - 0.5))
-        pet.particles.append(Particle("sweat", pet.BCX + 70,
-                                      pet.BCY - 124, pet.t - 0.2))
-        pet.particles.append(Particle("note", pet.BCX + 34,
-                                      pet.BCY - 40, pet.t - 0.6))
+        pet.particles.append(Particle("rumble", pet.BCX + 10,
+                                      pet.BCY - 34, pet.t - 0.5))
+        pet.particles.append(Particle("rumble", pet.BCX - 7,
+                                      pet.BCY - 39, pet.t - 0.95))
         pet.grab().save(os.path.join(PREVIEW_DIR, "preview_hungry.png"))
         snap("mischief")
         pet.hungry_amt.snap(0.0)      # 恶作剧预览回到正常体型（不然还是软趴的）

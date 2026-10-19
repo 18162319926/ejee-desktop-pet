@@ -287,7 +287,9 @@ def main():
     pet2._drop_bread(spot)
     check("嘴边松手吃到面包", pet2.phase == "bread", pet2.phase)
     s = pet2.width() / E.DW
-    want = ((spot.x() - pet2.x()) / s, (spot.y() - pet2.y()) / s)
+    # _feed_from 存的是"扣掉画布顶部留白"的设计坐标（paintEvent 会把整幅
+    # 画面 translate(0, PAD_T) 下移），所以屏幕 y 换算过来要减 PAD_T
+    want = ((spot.x() - pet2.x()) / s, (spot.y() - pet2.y()) / s - E.PAD_T)
     check("面包起点=松手点（设计坐标）",
           pet2._feed_from is not None
           and abs(pet2._feed_from[0] - want[0]) < 1.0

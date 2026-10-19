@@ -136,8 +136,9 @@ EJEE（伊吉）桌面宠物 —— 功能说明
    （Crumb 残渣是运行期临时生成的透明小窗，不落盘、退出时统一 stop）
 
 九、绘制约定（改代码前必读）
-    · 设计坐标 DW,DH = 400×400；s = width/DW；
-      （画布下方多出的 60px 只给睡眠正圆泡泡用，角色位置不变）
+    · 设计坐标 DW,DH = 400×472；s = width/DW；
+      （画布顶部 PAD_T=72px 给饥饿状态的海市蜃楼云朵、底部 60px 给睡眠
+       正圆泡泡；paintEvent 统一 translate(0,PAD_T)，角色位置不变）
       底图锚点 translate(BCX,BCY) = (195,318)；
       CHAR_W = 292 ≠ DW —— 底图 1548px 只映射成 292 设计 px，
       角色实际占 x 49..341、y 85..318（换算一律用 self.s / self.bw / self.bh）
@@ -300,14 +301,16 @@ def clamp(v, lo, hi):
     return max(lo, min(hi, v))
 
 
-# ---------------- 设计坐标系（400 x 400） ----------------
-# 高度 400 而不是 340：角色仍占 y 85..318（底图锚点 BCY 不动），
-# 多出来的下方 82px 是留给睡眠状态那颗正圆泡泡的——圆心 (195,201)、
-# 半径 188，泡泡下沿 y≈389，只有这样才不会被 widget 边框切平。
-# 窗口多出的透明区在落位/拖拽时按 _default_pos 的 pad 补偿，宠物不会悬空。
-DW, DH = 400.0, 400.0
-DH_CHAR = 340.0     # 角色（含投影）实际用到的画布高度，DH-DH_CHAR 只是给
-                    # 睡眠正圆泡泡的透明余量：落位/回位/缩放时不算可见高度
+# ---------------- 设计坐标系（400 x 472） ----------------
+# 画布上下都留透明区，头顶那块（PAD_T）是给饥饿状态的海市蜃楼云朵用的——
+# 它比角色高得多，原先 400 高只够塞下睡眠泡泡，云朵一大就贴边甚至被切。
+# 角色本身仍占设计坐标 y 85..318（底图锚点 BCY 不动），整幅画面在
+# paintEvent 里统一 translate(0, PAD_T) 下移，所以所有设计坐标一个都不用改。
+# 上下两块透明区在落位/拖拽/缩放时按 _win_pad_b 的镜像量补偿，宠物不会悬空。
+DW, DH = 400.0, 472.0
+PAD_T = 72.0          # 顶部透明区：海市蜃楼云朵的舞台
+DH_CHAR = 340.0       # 角色（含投影）实际用到的高度；DH-PAD_T-DH_CHAR 是
+                      # 底部透明余量（给睡眠正圆泡泡）：落位时不计入可见高度
 # 散步环带：窗口整体贴近屏幕四周边框（窗沿距边 BAND_NEAR..BAND_FAR px），
 # 沿环带边走边不横穿屏幕中央、不挡中间内容
 BAND_NEAR = 26.0        # 环带外沿：窗沿距屏幕边最近
@@ -1144,7 +1147,8 @@ class JuiceOverlay(QWidget):
             if age < 0.0 or age >= pt.life:
                 continue
             a = clamp(1.0 - age / pt.life, 0.0, 1.0)
-            g = pet.mapToGlobal(QPoint(int(pt.x * s), int(pt.y * s)))
+            g = pet.mapToGlobal(QPoint(int(pt.x * s),
+                                       int((pt.y + PAD_T) * s)))
             items.append((g.x(), g.y(), pt.size * s, a, age, pt.color))
         self._items = items
         if items:
@@ -1667,7 +1671,7 @@ class EjeePet(QWidget):
         self._say(self._line("mischief"), 2.2)
         # 尾巴甩动方向：朝鼠标那一侧甩（纯装饰；汁水本身向四周全方向溅射）
         s = self.width() / DW
-        tip = self.mapToGlobal(QPoint(int(340 * s), int(300 * s)))
+        tip = self.mapToGlobal(QPoint(int(340 * s), int((300 + PAD_T) * s)))
         m = QCursor.pos()
         ddx, ddy = m.x() - tip.x(), m.y() - tip.y()
         self._mis_dir = 1.0 if ddx >= 0 else -1.0
@@ -2301,10 +2305,11 @@ class EjeePet(QWidget):
                 self._sigh_t0 = self.t
                 for i in range(4):            # 破掉的泡皮碎屑
                     # 碎屑从海市蜃楼所在处炸开（气泡画在身体组内、被饿软
-                    # 的 sag 压过，位置按渲染结果折算到画布坐标）
+                    # 的 sag 压过，位置按渲染结果折算到画布坐标：
+                    # 云心 = BCY + (-300 × sag≈0.85) ≈ 63）
                     pt = Particle("bubble", self.BCX + 62
-                                  + random.uniform(-16, 16),
-                                  68 + random.uniform(-12, 16),
+                                  + random.uniform(-20, 20),
+                                  63 + random.uniform(-14, 18),
                                   self.t - i * 0.03)
                     pt.vx = random.uniform(-46, 46)
                     pt.vy = random.uniform(-56, -20)
@@ -3117,12 +3122,14 @@ class EjeePet(QWidget):
     def _draw_fantasy(self, p, f):
         """头顶幻想气泡：云朵里画着牛奶面包，2 秒后"啵"地破灭。
 
-        尺寸（2026-10-19 用户："面包可以和眼睛差不多大"）：
-          · 吐司整体 3 倍（美术原宽 20.8 → 62.4 设计 px，与眼睛 65.5 同量级）；
-          · 云朵另画成"紧包住吐司"的身形（97×92），不能跟着等比放大——
-            3 倍云（135 宽）塞不进头顶那片天空；
-          · 锚点是身体组局部 (64,-292)：云顶离画布顶还有 27px，云底在头顶
-            上方约 15px，小尾连着云底往下伸，整团浮在头顶右上方不压叶子。
+        尺寸（2026-10-19 用户两轮反馈）：
+          · 吐司与眼睛同量级（65.5 × 70.9 设计 px）——这轮改成**直接按最终
+            尺寸作画**，不再套 p.scale(3,3)：放大后的粗描边读起来像塑料，
+            按最终尺寸画才能加烤边渐变、烤痕、气孔、黄油融化这些让它
+            "像真面包"的细节；
+          · 云朵跟着放大到 1.45 倍（141 × 139），为此把画布顶部让出
+            PAD_T=72px 的透明区（见 DW/DH/PAD_T），云顶不再被 widget 切；
+          · 锚点是身体组局部 (64,-300)：整团浮在头顶右上方，压不到叶子。
         """
         t = f["t"]
         # 幻想气泡：头顶云朵里画着牛奶面包，2 秒后"啵"地破灭
@@ -3142,13 +3149,13 @@ class EjeePet(QWidget):
             if fa > 0.01:
                 p.save()
                 p.setOpacity(fa * 0.96)
-                p.translate(64, -292 + 1.2 * math.sin(t * 1.7))  # 轻飘
+                p.translate(64, -300 + 1.2 * math.sin(t * 1.7))  # 轻飘
                 p.scale(fsc, fsc)
-                # （"啵"的扩散环画不出来：云瓣半径大、环只能到云边，几乎
-                #   整圈都躲在云后面。破灭感交给「云猛放大 + 急速淡出」和
-                #   _tick 里喷出的 4 颗 bubble 碎屑。）
-                # 云朵：底圆 + 七瓣圆并集，一条干净轮廓（与对话气泡同画风）；
-                # 轮廓要兜住 3 倍吐司（±31.2 × -22.8..22.8），左右留白 ~17px
+                # ---- 云朵：整体放大 1.45 倍（用户："云朵也要放大"）----
+                # "啵"的扩散环画不出来（环几乎全躲在云后面），破灭感交给
+                # 「云猛放大 + 急速淡出」和 _tick 里喷出的 4 颗 bubble 碎屑。
+                p.save()
+                p.scale(1.45, 1.45)
                 cloud = QPainterPath()
                 cloud.addEllipse(QPointF(0, 2), 40, 30)
                 for (bx, by, br) in ((-22, -26, 16), (2, -32, 18),
@@ -3162,80 +3169,176 @@ class EjeePet(QWidget):
                 p.setPen(Qt.NoPen)
                 p.setBrush(QColor(140, 95, 50, 30))
                 p.save()
-                p.translate(3.0, 4.2)
+                p.translate(2.6, 3.6)
                 p.drawPath(cloud)
                 p.restore()
-                p.setPen(QPen(QColor("#E8A259"), 3.0, Qt.SolidLine,
+                # 云体：上缘暖白、下缘偏冷白，读成有厚度的云
+                cg = QLinearGradient(0.0, -52.0, 0.0, 46.0)
+                cg.setColorAt(0.0, QColor(255, 251, 242, 248))
+                cg.setColorAt(0.55, QColor(252, 250, 246, 246))
+                cg.setColorAt(1.0, QColor(236, 240, 246, 244))
+                p.setPen(QPen(QColor("#E8A259"), 2.4, Qt.SolidLine,
                               Qt.RoundCap, Qt.RoundJoin))
-                p.setBrush(QColor(255, 252, 245, 246))
+                p.setBrush(cg)
                 p.drawPath(cloud)
-                # 意念泡小尾：两枚渐小的圆，斜垂向头顶（第一枚要搭在云底上）
-                for (tx_, ty_, tr_) in ((7.0, 32.0, 5.5), (3.0, 43.0, 3.6)):
-                    p.setPen(QPen(QColor("#E8A259"), 2.6))
+                # 云内受光/背光：顶部一道淡白高光、底部一层冷蓝阴影
+                p.save()
+                p.setClipPath(cloud)
+                p.setPen(Qt.NoPen)
+                p.setBrush(QColor(255, 255, 255, 120))
+                p.drawEllipse(QPointF(-14, -34), 24, 13)
+                p.setBrush(QColor(198, 214, 234, 90))
+                p.drawEllipse(QPointF(20, 30), 30, 15)
+                p.restore()
+                p.restore()
+                # 意念泡小尾：两枚渐小的圆，从云底斜垂向头顶
+                for (tx_, ty_, tr_) in ((8.0, 52.0, 5.5), (3.0, 66.0, 3.8)):
+                    p.setPen(QPen(QColor("#E8A259"), 2.4))
                     p.setBrush(QColor(255, 251, 243, 244))
                     p.drawEllipse(QPointF(tx_, ty_), tr_, tr_)
-                # 牛奶吐司：3 倍放大（与眼睛同量级）——方形面包片（顶部两瓣
-                # 圆肩）+ 焦黄烤边 + 一块黄油；整块 scale 放大，描边跟着
-                # 等比变粗，比例不变形
-                p.save()
-                p.scale(3.0, 3.0)
-                p.setPen(QPen(QColor("#C08A4E"), 1.8, Qt.SolidLine,
+                # ================= 牛奶吐司（按最终尺寸作画） =================
+                # 用户："面包图标要更真实"。真实感来自四层：
+                #   ① 烤边壳（比面包心大 4.4px，焦黄竖向渐变 + 深棕收边）
+                #   ② 面包心（奶白纵向渐变，边缘一圈内阴影）
+                #   ③ 表面细节（软边烤痕斑 + 气孔孔洞 + 左上受光）
+                #   ④ 一块正在融化的黄油（带高光和往下淌的一道）
+                TW, TH = 35.0, 26.0        # 半宽 / 半高
+                TCY = -2.0                # 吐司中心相对云心的纵向偏移
+
+                def toast_path(inset):
+                    """吐司轮廓；inset>0 时整体向内收（烤边壳/面包心共用）。
+                    顶部是牛奶吐司标志性的两个圆鼓肩 + 中间一道浅凹。"""
+                    a, b = TW - inset, TH - inset * 0.92
+                    pth = QPainterPath()
+                    pth.moveTo(-a + 7.0, TCY + b)
+                    pth.lineTo(a - 7.0, TCY + b)               # 底边平直
+                    pth.quadTo(a, TCY + b, a, TCY + b - 7.0)  # 右下圆角
+                    pth.lineTo(a, TCY - 3.0)                  # 右侧
+                    # 右肩：一段四分之一圆鼓包下来收到顶中
+                    pth.cubicTo(a, TCY - b + 1.6, a * 0.54, TCY - b,
+                                2.0, TCY - b + 1.0)
+                    pth.quadTo(0.0, TCY - b + 2.2,           # 顶中浅凹
+                               -2.0, TCY - b + 1.0)
+                    pth.cubicTo(-a * 0.54, TCY - b, -a, TCY - b + 1.6,
+                                -a, TCY - 3.0)                # 左肩
+                    pth.lineTo(-a, TCY + b - 7.0)
+                    pth.quadTo(-a, TCY + b, -a + 7.0, TCY + b)
+                    pth.closeSubpath()
+                    return pth
+
+                sil = toast_path(0.0)       # 烤边壳轮廓
+                mid = toast_path(4.4)       # 面包心轮廓
+
+                # ① 烤边壳：焦黄渐变（上浅下深）
+                crg = QLinearGradient(0.0, TCY - TH, 0.0, TCY + TH)
+                crg.setColorAt(0.0, QColor("#DCA25C"))
+                crg.setColorAt(0.55, QColor("#C4833F"))
+                crg.setColorAt(1.0, QColor("#A96C2E"))
+                p.setPen(QPen(QColor("#8A5A2B"), 1.8, Qt.SolidLine,
                               Qt.RoundCap, Qt.RoundJoin))
-                p.setBrush(QColor(253, 235, 198))
-                tx = 10.4
-                toast = QPainterPath()
-                toast.moveTo(-tx, 6.2)
-                toast.quadTo(-tx, 7.6, -tx + 1.6, 7.6)
-                toast.lineTo(tx - 1.6, 7.6)
-                toast.quadTo(tx, 7.6, tx, 6.2)
-                toast.lineTo(tx, -1.4)
-                toast.cubicTo(tx, -5.6, tx * 0.52, -7.6, 0, -7.6)
-                toast.cubicTo(-tx * 0.52, -7.6, -tx, -5.6, -tx, -1.4)
-                toast.closeSubpath()
-                p.drawPath(toast)
-                # 烤皮：沿吐司肩线压一条偏厚的焦黄边
-                p.setPen(QPen(QColor("#DFA968"), 2.4, Qt.SolidLine,
-                              Qt.RoundCap))
-                crust = QPainterPath()
-                crust.moveTo(-tx + 1.2, -1.8)
-                crust.cubicTo(-tx + 0.8, -5.0, -tx * 0.5, -6.4, 0, -6.4)
-                crust.cubicTo(tx * 0.5, -6.4, tx - 0.8, -5.0, tx - 1.2, -1.8)
-                p.drawPath(crust)
-                # 黄油：中间一小块 + 一道窄高光
+                p.setBrush(crg)
+                p.drawPath(sil)
+
+                # ② 面包心：奶白纵向渐变
                 p.setPen(Qt.NoPen)
-                p.setBrush(QColor(247, 205, 114))
-                p.drawRoundedRect(QRectF(-4.2, -3.9, 8.4, 5.0), 1.3, 1.3)
-                p.setBrush(QColor(255, 235, 176, 190))
-                p.drawRoundedRect(QRectF(-3.4, -3.4, 4.6, 1.4), 0.6, 0.6)
+                pgb = QLinearGradient(0.0, TCY - TH, 0.0, TCY + TH)
+                pgb.setColorAt(0.0, QColor(251, 235, 201))
+                pgb.setColorAt(1.0, QColor(235, 207, 156))
+                p.setBrush(pgb)
+                p.drawPath(mid)
+
+                # ③ 表面细节：烤痕斑 + 气孔 + 边缘内阴影 + 左上受光
+                p.save()
+                p.setClipPath(mid)
+                for (mx, my, mr, ma) in ((-16.0, -11.0, 9.5, 46),
+                                         (13.0, -14.0, 7.5, 38),
+                                         (2.0, 5.0, 10.5, 30),
+                                         (-7.0, -17.0, 6.0, 34)):
+                    rg = QRadialGradient(QPointF(mx, TCY + my), mr)
+                    rg.setColorAt(0.0, QColor(198, 143, 78, ma))
+                    rg.setColorAt(1.0, QColor(198, 143, 78, 0))
+                    p.setPen(Qt.NoPen)
+                    p.setBrush(rg)
+                    p.drawEllipse(QPointF(mx, TCY + my), mr, mr)
+                # 气孔：几个小洞
+                p.setPen(Qt.NoPen)
+                p.setBrush(QColor(206, 170, 116, 130))
+                for (hx, hy, hr) in ((-20.0, 8.0, 1.8), (-7.0, -6.0, 1.4),
+                                     (9.0, 12.0, 1.6), (19.0, -2.0, 1.3),
+                                     (0.0, 16.0, 1.5)):
+                    p.drawEllipse(QPointF(hx, TCY + hy), hr, hr)
+                # 边缘内阴影：沿面包心轮廓描一道半透明棕
+                p.setBrush(Qt.NoBrush)
+                p.setPen(QPen(QColor(146, 98, 46, 95), 3.0, Qt.SolidLine,
+                              Qt.RoundCap, Qt.RoundJoin))
+                p.drawPath(mid)
+                # 左上受光：径向渐变的软斑（实色椭圆会留硬边）
+                sheen = QRadialGradient(QPointF(-16, TCY - 14), 26)
+                sheen.setColorAt(0.0, QColor(255, 255, 255, 96))
+                sheen.setColorAt(1.0, QColor(255, 255, 255, 0))
+                p.setPen(Qt.NoPen)
+                p.setBrush(sheen)
+                p.drawEllipse(QPointF(-16, TCY - 14), 26, 18)
                 p.restore()
+
+                # ④ 黄油：方块微微陷进面包，右下淌下一道融化的黄油
+                bx, by = -11.0, TCY - 13.0
+                bw2, bh2 = 22.0, 15.0
+                btb = QLinearGradient(bx, by, bx, by + bh2)
+                btb.setColorAt(0.0, QColor(255, 233, 166))
+                btb.setColorAt(1.0, QColor(224, 172, 66))
+                p.setPen(QPen(QColor("#C9973A"), 1.4, Qt.SolidLine,
+                              Qt.RoundCap, Qt.RoundJoin))
+                p.setBrush(btb)
+                p.drawRoundedRect(QRectF(bx, by, bw2, bh2), 3.0, 3.0)
+                p.setPen(Qt.NoPen)
+                p.setBrush(QColor(255, 250, 214, 175))
+                p.drawRoundedRect(QRectF(bx + 2.6, by + 2.0, bw2 * 0.50, 3.4),
+                                  1.6, 1.6)
+                drip = QPainterPath()
+                drip.moveTo(bx + bw2 * 0.64, by + bh2 - 1.2)
+                drip.cubicTo(bx + bw2 * 0.74, by + bh2 + 4.6,
+                             bx + bw2 * 0.55, by + bh2 + 7.4,
+                             bx + bw2 * 0.63, by + bh2 + 10.6)
+                p.setPen(QPen(QColor("#EFC65E"), 3.0, Qt.SolidLine,
+                              Qt.RoundCap))
+                p.setBrush(Qt.NoBrush)
+                p.drawPath(drip)
                 # 热气：三缕细汽从吐司顶端往上冒、穿出云层（白色画在白云上
                 # 等于没有，所以用带一点暖灰的雾色，并且在云外也能看到）。
-                # 不跟着吐司一起放大——3 倍粗的汽会像烟囱，笔宽单独给细的
+                # 云顶在 -52×1.45 ≈ -75，汽得拉到 -108 才穿出云顶冒到外面
                 p.setBrush(Qt.NoBrush)
                 for k in range(3):
                     ph = t * 1.9 + k * 1.7
                     hx = -15.0 + 15.0 * k
-                    a_ = int(110 + 70 * math.sin(ph * 1.3))
+                    a_ = int(118 + 74 * math.sin(ph * 1.3))
                     if a_ <= 6:
                         continue
-                    p.setPen(QPen(QColor(188, 170, 150, a_), 2.2,
+                    p.setPen(QPen(QColor(180, 160, 140, a_), 2.8,
                                   Qt.SolidLine, Qt.RoundCap))
-                    yy = -20.0 - 1.8 * math.sin(ph * 0.7)
+                    yy = TCY - TH - 2.0 - 1.8 * math.sin(ph * 0.7)
                     st = QPainterPath()
                     st.moveTo(hx, yy)
-                    st.cubicTo(hx - 4.2, yy - 5.0, hx + 4.6, yy - 9.0,
-                               hx - 1.0, yy - 13.4)
-                    st.cubicTo(hx - 3.9, yy - 16.2, hx + 2.2, yy - 17.4,
-                               hx + 1.1, yy - 18.8)
+                    st.cubicTo(hx - 5.2, yy - 9.0, hx + 5.6, yy - 17.0,
+                               hx - 1.4, yy - 26.0)
+                    st.cubicTo(hx - 5.6, yy - 32.0, hx + 3.0, yy - 36.0,
+                               hx + 1.4, yy - 41.0)
                     p.drawPath(st)
-                # 闪光：吐司右肩上的小四角星，明暗闪烁
+                # 闪光：吐司右上肩外一颗四角星（在云里最显眼），明暗闪烁
                 tw_ = 0.55 + 0.45 * math.sin(t * 4.6)
-                p.setPen(QPen(QColor(255, 226, 152, int(235 * tw_)), 2.6,
+                p.setPen(QPen(QColor(255, 198, 92, int(245 * tw_)), 3.4,
                               Qt.SolidLine, Qt.RoundCap))
-                p.drawLine(QPointF(20.0 - 4.2 * tw_, -16.0),
-                           QPointF(20.0 + 4.2 * tw_, -16.0))
-                p.drawLine(QPointF(20.0, -16.0 - 4.2 * tw_),
-                           QPointF(20.0, -16.0 + 4.2 * tw_))
+                p.drawLine(QPointF(46.0 - 6.0 * tw_, -34.0),
+                           QPointF(46.0 + 6.0 * tw_, -34.0))
+                p.drawLine(QPointF(46.0, -34.0 - 6.0 * tw_),
+                           QPointF(46.0, -34.0 + 6.0 * tw_))
+                # 左下一颗小星，做出双星
+                p.setPen(QPen(QColor(255, 214, 130, int(215 * tw_)), 2.4,
+                              Qt.SolidLine, Qt.RoundCap))
+                p.drawLine(QPointF(-46.0 - 3.6 * tw_, 20.0),
+                           QPointF(-46.0 + 3.6 * tw_, 20.0))
+                p.drawLine(QPointF(-46.0, 20.0 - 3.6 * tw_),
+                           QPointF(-46.0, 20.0 + 3.6 * tw_))
                 p.restore()
 
     def _draw_sleep_bubble(self, p, f):
@@ -3258,7 +3361,7 @@ class EjeePet(QWidget):
         # 角色实际轮廓到圆心 (195,201) 最远 174px（左下鱼鳍），取 rc=180 时
         # 四周还各留 6~10px 空气；再加呼吸鼓动 wob(±2.2%) 也不出画布：
         # 左沿 8px、下沿 10px，泡泡整颗正圆、不再被 widget 边框切掉。
-        # 画布已加高到 400（见 DW, DH），圆心落在角色中轴 y≈201。
+        # 画布上下都留了透明区（见 DW, DH, PAD_T），圆心落在角色中轴 y≈201。
         cxc, cyc = 0.0, -bh * 0.50
         rc = 180.0 * wob
 
@@ -3431,6 +3534,7 @@ class EjeePet(QWidget):
         p.setRenderHint(QPainter.TextAntialiasing, True)
         p.setRenderHint(QPainter.SmoothPixmapTransform, True)
         p.scale(self.width() / DW, self.width() / DW)   # 设计坐标 -> 窗口坐标
+        p.translate(0.0, PAD_T)   # 整体下移：给头顶的海市蜃楼云朵腾出舞台
         p.setPen(Qt.NoPen)
 
         f = self._frame_ctx()        # 本帧共享量（弹簧快照/视线/表情显形度）
@@ -4192,7 +4296,7 @@ class EjeePet(QWidget):
         """嘴在世界坐标里的位置（缩放/移动后每帧算）。"""
         s = self.width() / DW
         return QPoint(int(self.pos().x() + self.mouth_center[0] * s),
-                      int(self.pos().y() + self.mouth_center[1] * s))
+                      int(self.pos().y() + (self.mouth_center[1] + PAD_T) * s))
 
     def _close_bread(self):
         if self._bread is not None:
@@ -4261,7 +4365,8 @@ class EjeePet(QWidget):
             # 飞进嘴，而不是从身前的固定位置凭空出现）
             s = self.width() / DW
             self._feed_from = (clamp((gpos.x() - self.x()) / s, -30.0, DW + 30.0),
-                               clamp((gpos.y() - self.y()) / s, -30.0, DH + 30.0))
+                               clamp((gpos.y() - self.y()) / s - PAD_T,
+                                     -30.0, DH + 30.0))
             self.phase = "idle"              # 喂食相位优先，免得这一口被吞
             self.feed()
             if self.phase == "bread":        # 真吃到了才喊"啊呜"（拒收时不喊）
@@ -4309,8 +4414,9 @@ class EjeePet(QWidget):
 
     def _win_pad_b(self):
         """画布下方那块只给睡眠正圆泡泡的透明区（px）。落位/回位/缩放时
-        不该把它算进"可见高度"，否则宠物会被顶起来悬空。"""
-        return int(round((DH - DH_CHAR) * self.size))
+        不该把它算进"可见高度"，否则宠物会被顶起来悬空。顶部那块
+        (PAD_T) 不用减——角色本来就在 PAD_T 下面，可见高度从窗口顶算起。"""
+        return int(round((DH - PAD_T - DH_CHAR) * self.size))
 
     def _default_pos(self):
         scr = QApplication.primaryScreen()
@@ -4435,7 +4541,7 @@ class EjeePet(QWidget):
         # 冻结光标锚点：缩放全程光标指向的设计坐标钉在原地
         s_old = self.width() / DW
         self._zoom_anchor = ((gp.x() - self.x()) / s_old,
-                             (gp.y() - self.y()) / s_old, gp)
+                             (gp.y() - self.y()) / s_old - PAD_T, gp)
 
     def wheelEvent(self, e):
         # Shift+滚轮缩放：仅悬停在本窗口上时触发，无 Shift 不响应（防误触）

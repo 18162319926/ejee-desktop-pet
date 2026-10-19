@@ -3183,9 +3183,13 @@ class EjeePet(QWidget):
             return
         t, bw, bh = f["t"], f["bw"], f["bh"]
         wob = 1.0 + 0.022 * math.sin(t * 2.1)          # 轻轻鼓动
-        cxc, cyc = 0.0, -bh * 0.42
-        rx = bw * 0.62 * wob
-        ry = bh * 0.74 / wob
+        # 泡泡必须整颗画在 400×340 的画布里：按角色实际占位
+        # （x 49..341 / y 85..318）取椭圆，横向 0.60bw、纵向 0.545bh，
+        # 圆心落在角色中心。原来 ry=0.74bh、圆心 -0.42bh，下沿会跑到
+        # y≈393（比画布底多 50px），底部整段弧被 widget 边界切掉。
+        cxc, cyc = 0.0, -bh * 0.51
+        rx = bw * 0.64 * wob
+        ry = bh * 0.575 / wob
         rect = QRectF(cxc - rx, cyc - ry, 2 * rx, 2 * ry)
         p.save()
         p.setOpacity(sa)

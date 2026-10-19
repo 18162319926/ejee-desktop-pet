@@ -2672,6 +2672,26 @@ class EjeePet(QWidget):
         t, c, gaze, ha = f["t"], f["c"], f["gaze"], f["ha"]
         sa, ma, blink = f["sa"], f["ma"], f["blink"]
         nrv = clamp(self._pomo_nrv.v, 0.0, 1.0)   # 番茄钟最后一分钟：眼睛瞪大一点
+        # 腮红（生气/委屈时随 puff 渐显）：双眼下方偏外侧两团暖红。
+        # 用多层同心椭圆叠出柔边 —— QRadialGradient 是正圆，映射到扁椭圆
+        # 时会在边缘留下硬边，实色多层的台阶在这么大尺度上看不出来。
+        bk = clamp(c["puff"], 0.0, 1.0)
+        if bk > 0.03:
+            p.save()
+            p.setOpacity(bk)
+            p.setPen(Qt.NoPen)
+            for key, sgn in (("eye_l", -1), ("eye_r", 1)):
+                ex, ey, ew, eh = self.eye_pos[key]
+                ex -= self.BCX
+                ey -= self.BCY
+                bx = ex + sgn * ew * 0.22      # 眼睛下方、略偏外侧（眼外角下）
+                by = ey + eh * 0.54
+                rx, ry = ew * 0.29, eh * 0.17
+                for i, al in enumerate((11, 12, 14, 16, 18, 21, 24, 27)):
+                    k = 1.0 - 0.095 * i        # 外圈大而淡，内圈小而浓
+                    p.setBrush(QColor(226, 84, 88, al))
+                    p.drawEllipse(QPointF(bx, by), rx * k, ry * k)
+            p.restore()
         # 眼睛精灵：缩放（月牙/放大）、下垂、旋转、眨眼、视线；
         # 官方五表情：happy 双眯眼弧 ∩∩、surprised 左眼眨眼
         for key, pm, rot_dir, wk in (
@@ -2804,15 +2824,8 @@ class EjeePet(QWidget):
             pf = clamp(c["puff"], 0.0, 1.0)
             p.save()
             p.setOpacity(pf)
-            # 脸红：脸颊外侧两团低透明度暖红径向渐变（气到脸红），
-            # 位置在腮红点下方外侧，不糊眼睛
-            for sgn in (-1, 1):
-                bl = QRadialGradient(QPointF(sgn * 96, -26), 30)
-                bl.setColorAt(0.0, QColor(232, 110, 90, 60))
-                bl.setColorAt(1.0, QColor(232, 110, 90, 0))
-                p.setPen(Qt.NoPen)
-                p.setBrush(QBrush(bl))
-                p.drawEllipse(QPointF(sgn * 96, -26), 30, 22)
+            # （原"脸颊外侧两团径向渐变脸红"已上移到 _draw_eyes 开头，
+            #   改成眼睛下方的多层椭圆腮红：单层径向渐变在扁椭圆上有硬边）
             for key, sgn in (("eye_l", -1), ("eye_r", 1)):
                 ex, ey, ew, eh = self.eye_pos[key]
                 ex -= self.BCX
@@ -2941,7 +2954,10 @@ class EjeePet(QWidget):
                 hx = mw * 0.26            # 嘴角半宽
                 y_apex = wbot - mh * 0.29 + dy_m   # 撇嘴中央（最高处）
                 y_cor = wbot - mh * 0.04 + dy_m    # 嘴角（最低处）
-                y_top = wbot - mh * 0.61 + dy_m    # 人中竖线顶端（探进鼻子）
+                # 人中竖线顶端：ω 素材里那根"朝上连鼻子"的竖线正好顶到
+                # 素材上沿往下 0.23mh（= 鼻子下缘）。这里取同一个位置，且
+                # 不叠加 dy_m —— 嘴垂坠/发颤时上端仍咬住鼻子，不会脱开。
+                y_top = mcy - mh * 0.23
                 tail = mh * 0.07                   # 嘴角向外的下垂小尾巴
                 pen = QPen(QBrush(QColor(OMEGA_COL)), sw, Qt.SolidLine,
                            Qt.RoundCap, Qt.RoundJoin)

@@ -37,10 +37,10 @@ EJEE（伊吉）桌面宠物 —— 功能说明
                 醒来时泡泡"啵"地破成一圈小泡泡
    两层「叠加式」表情图层，可与上面任意状态共存：
      · 饥饿层（饱食度 < 30，hungry_amt）：全身以脚底为支点压扁 15%（软趴），
-      叶子只枯萎转土黄（不耷拉），波浪嘴 + 口水，肚子每隔几秒咕咕叫
-      （肚皮冒出 1~2 组半透明黄色同心圆声波 + 肚子抽一下），每 10 秒
-      头顶飘一朵海市蜃楼（云里的牛奶吐司 + 热气）2 秒后啵地破灭，
-      跟着叹一口气 + 头顶面包幻想气泡（2s 后"啵"地破灭）
+      叶子只枯萎转土黄（不耷拉），波浪嘴（不流口水），肚子每隔几秒轻轻抽一下
+      （咕咕叫，不再画黄色同心圆波），每 10 秒头顶飘一朵较大的海市蜃楼
+      （云里的牛奶吐司 + 热气）2 秒后啵地破灭，跟着叹一口气
+      + 头顶面包幻想气泡（2s 后"啵"地破灭）；眼睛保持原形不压扁
       + 身体下沉、尾巴无力、悬停时努力抬头；此期间不再触发惊讶/庆祝/散步
      · 睡眠层（sleep_amt）：闭眼弧与 ω 嘴 ⇄ 小圆嘴的交叉渐显
      · 可怜层（屏幕上有面包渣，_pity）：视线锁定残渣 + 表情复用 angry
@@ -556,15 +556,6 @@ class Particle:
             self.color = QColor(150, 170, 200)
             self.size = random.uniform(9, 14)
             self.life = random.uniform(2.4, 3.2)
-        elif kind == "rumble":
-            # 肚子咕咕叫：从肚皮冒出的半透明黄色同心圆声波，缓慢上浮
-            self.vx = random.uniform(-3, 3)
-            self.vy = random.uniform(-11, -6)
-            self.rot = random.uniform(0, 6.28)   # 用作摆动相位
-            self.vr = 0.0
-            self.color = QColor(246, 200, 92)    # 声波黄（绘制时再按扩散渐隐）
-            self.size = random.uniform(9.0, 13.0)  # 基准半径（设计 px）
-            self.life = random.uniform(1.5, 1.9)
         else:  # steam
             self.vx = random.uniform(-8, 8)
             self.vy = random.uniform(-46, -30)
@@ -2433,19 +2424,14 @@ class EjeePet(QWidget):
                     "zzz", self.BCX + random.uniform(30, 56),
                     self.head_top + random.uniform(-2, 10), self.t))
 
-        # 肚子咕咕叫：每隔几秒一声——肚皮位置冒出 1~2 组半透明黄色
-        # 同心圆声波，同时肚子抽一下（_sq 轻踢）
+        # 肚子咕咕叫：每隔几秒一声——不再画黄色同心圆波（用户要求），
+        # 只让肚皮轻轻抽一下（_sq 轻踢），读作“咕咕”的轻微颤动
         if (self.hungry_amt.v > 0.3 and self.state == "idle"
                 and self.phase == "idle" and not self._pass):
             self._fx_timer2 -= dt
             if self._fx_timer2 <= 0:
                 self._fx_timer2 = random.uniform(2.7, 3.7)
-                for i in range(random.choice((1, 2))):
-                    self.particles.append(Particle(
-                        "rumble", self.BCX + random.uniform(-16, 16),
-                        self.BCY - 34 + random.uniform(-7, 7),
-                        self.t - i * random.uniform(0.12, 0.30)))
-                self._sq.kick(1.2)      # 位移峰值约 8%，读作肚子抽一下
+                self._sq.kick(0.6)      # 轻微肚皮抖动（峰值约 4%），表示咕咕叫
 
         # 粒子物理
         alive = []
@@ -2769,9 +2755,10 @@ class EjeePet(QWidget):
                             ey + c["eye_dy"] + gaze[1] * 2.5 * (1.0 + 0.9 * ha)
                             + ha * 2.2)
                 p.rotate(rot_dir * c["eye_rot"])
-                p.scale(c["eye_sx"] * (1.0 + 0.06 * ha) * (1.0 + 0.05 * nrv),
-                        c["eye_sy"] * (1.0 - 0.10 * ha) * max(0.05, blink)
-                        * (1.0 + 0.04 * nrv) * (1.0 - 0.30 * f["sigh"]))
+                # 眼睛保持原形：饥饿/叹气都不压扁（用户要求）
+                p.scale(c["eye_sx"] * (1.0 + 0.05 * nrv),
+                        c["eye_sy"] * max(0.05, blink)
+                        * (1.0 + 0.04 * nrv))
                 p.drawPixmap(QRectF(-ew / 2, -eh / 2, ew, eh), epm,
                              QRectF(0, 0, epm.width(), epm.height()))
                 p.restore()
@@ -2802,7 +2789,7 @@ class EjeePet(QWidget):
                                  2 * aw, 2 * ah), 180 * 16, 180 * 16)
             p.restore()
         # （原「可怜泪花」已删除：泪珠读作委屈/快哭，和“饿瘪了”的语义打架。
-        #   饥饿层现在只留：压扁的眼睛、波浪嘴、嘴角口水。）
+        #   饥饿层现在只留：原形眼睛、波浪嘴（不流口水）、枯萎叶子、海市蜃楼）
         # 恶作剧坏笑眼：＞＜ 折线（双眼向中间挤成 V 形，精灵同步淡出）
         if ma > 0.02 and sa < 0.5:
             p.save()
@@ -2931,7 +2918,7 @@ class EjeePet(QWidget):
 
     def _draw_mouth(self, p, f):
         """嘴：ω 精灵 + 各表情嘴（张嘴笑 / 吐舌 / 生气撇嘴 + 人中 / 睡眠圆嘴 /
-        饥饿波浪嘴 + 口水 / 恶作剧坏笑 + 舌头）。"""
+        饥饿波浪嘴（不流口水）/ 恶作剧坏笑 + 舌头）。"""
         bw, bh, s2 = f["bw"], f["bh"], f["s2"]
         sa, ma, ha = f["sa"], f["ma"], f["ha"]
         # 可怜层（面包掉地上）：表情与 angry 一致，这里把生气撇嘴也画出来
@@ -3077,14 +3064,6 @@ class EjeePet(QWidget):
                           Qt.RoundCap, Qt.RoundJoin))
             p.setBrush(Qt.NoBrush)
             p.drawPath(path)
-            # 口水：透明浅蓝小水滴挂在右嘴角，随时间轻微拉长（摇摇欲坠）
-            p.setOpacity(ha * 0.80)
-            p.setPen(Qt.NoPen)
-            p.setBrush(QColor(176, 216, 244, 222))
-            dh = mh * (0.22 + 0.05 * math.sin(self.t * 1.9))
-            self._teardrop(p, mcx + w * 0.46, y0 + amp * 0.35 + dh * 0.42,
-                           mw * 0.062, dh)
-            p.setOpacity(1.0)
         # （原「脸颊凹陷深棕渐变」和「脸颊暗带」两版都删掉了：在橙色圆脸上
         #   无论怎么调都读成脏斑/竖纹。饿瘪改用几何做——见 _apply_body_pose
         #   里的 sag：以脚底为支点压扁 + 全身微微内收，轮廓自己就瘪了。）
@@ -3153,9 +3132,9 @@ class EjeePet(QWidget):
             if fa > 0.01:
                 p.save()
                 p.setOpacity(fa * 0.96)
-                p.translate(58, -294 + 1.2 * math.sin(t * 1.7))  # 轻飘
-                # "极小"：整体再收 0.78；海市蜃楼本来就该是若有若无的一小团
-                p.scale(fsc * 0.78, fsc * 0.78)
+                p.translate(58, -282 + 1.2 * math.sin(t * 1.7))  # 轻飘
+                # 海市蜃楼：整体放大到 ~1.0（用户要求“大一点”），比原 0.78 明显更大
+                p.scale(fsc * 1.0, fsc * 1.0)
                 # （"啵"的扩散环画不出来：云瓣半径 18.6、环只能到 22，几乎
                 #   整圈都躲在云后面。破灭感交给「云猛放大 + 急速淡出」和
                 #   _tick 里喷出的 4 颗 bubble 碎屑。）
@@ -3748,31 +3727,6 @@ class EjeePet(QWidget):
                 p.drawLine(QPointF(wob - hw, sz * 0.55),
                            QPointF(wob + hw, sz * 0.55))
                 p.setPen(Qt.NoPen)
-            elif pt.kind == "rumble":
-                # 肚子咕咕叫：肚皮冒出半透明黄色同心圆声波——三圈错相出发、
-                # 半径持续扩散、越扩越淡，缓慢上浮，读作"咕咕叫了一声"。
-                # 每圈画两遍：宽而极淡的光晕 + 窄而实的芯线，在橘色肚皮上
-                # 才读得出来（单细线会被底色吃掉）
-                wob = math.sin(age * 5.0 + pt.rot) * 1.4
-                p.translate(wob, 0)
-                for i in range(3):
-                    d0 = i * 0.19                      # 三圈错相出发
-                    u = clamp((age - d0) / (pt.life - d0), 0.0, 1.0)
-                    if u <= 0.0:
-                        continue
-                    rr = pt.size * (0.30 + 1.30 * u)   # 半径持续扩散
-                    al = a * (1.0 - u) ** 0.95
-                    if al < 0.012:
-                        continue
-                    p.setBrush(Qt.NoBrush)
-                    p.setPen(QPen(QColor(252, 216, 108, int(al * 0.20 * 255)),
-                                  6.5, Qt.SolidLine, Qt.RoundCap))
-                    p.drawEllipse(QPointF(0.0, 0.0), rr, rr)
-                    p.setPen(QPen(QColor(252, 216, 108, int(al * 0.88 * 255)),
-                                  2.8, Qt.SolidLine, Qt.RoundCap))
-                    p.drawEllipse(QPointF(0.0, 0.0), rr, rr)
-                p.setPen(Qt.NoPen)
-                p.setBrush(Qt.NoBrush)
             elif pt.kind == "heart":
                 sz = pt.size
                 path = QPainterPath()
@@ -4911,11 +4865,7 @@ def main():
         pet.particles.clear()
         pet.t = 10.6
         pet._last_t = 10.6
-        pet._fantasy = {"t0": pet.t - 0.9}    # 幻想气泡（展示期）
-        pet.particles.append(Particle("rumble", pet.BCX + 10,
-                                      pet.BCY - 34, pet.t - 0.5))
-        pet.particles.append(Particle("rumble", pet.BCX - 7,
-                                      pet.BCY - 39, pet.t - 0.95))
+        pet._fantasy = {"t0": pet.t - 0.9}    # 幻想气泡（展示期，放大版海市蜃楼）
         pet.grab().save(os.path.join(PREVIEW_DIR, "preview_hungry.png"))
         snap("mischief")
         pet.hungry_amt.snap(0.0)      # 恶作剧预览回到正常体型（不然还是软趴的）

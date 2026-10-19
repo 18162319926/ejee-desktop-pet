@@ -133,7 +133,8 @@ EJEE（伊吉）桌面宠物 —— 功能说明
    （Crumb 残渣是运行期临时生成的透明小窗，不落盘、退出时统一 stop）
 
 九、绘制约定（改代码前必读）
-    · 设计坐标 DW,DH = 400×340；s = width/DW；
+    · 设计坐标 DW,DH = 400×400；s = width/DW；
+      （画布下方多出的 60px 只给睡眠正圆泡泡用，角色位置不变）
       底图锚点 translate(BCX,BCY) = (195,318)；
       CHAR_W = 292 ≠ DW —— 底图 1548px 只映射成 292 设计 px，
       角色实际占 x 49..341、y 85..318（换算一律用 self.s / self.bw / self.bh）
@@ -296,8 +297,14 @@ def clamp(v, lo, hi):
     return max(lo, min(hi, v))
 
 
-# ---------------- 设计坐标系（400 x 340） ----------------
-DW, DH = 400.0, 340.0
+# ---------------- 设计坐标系（400 x 400） ----------------
+# 高度 400 而不是 340：角色仍占 y 85..318（底图锚点 BCY 不动），
+# 多出来的下方 82px 是留给睡眠状态那颗正圆泡泡的——圆心 (195,201)、
+# 半径 188，泡泡下沿 y≈389，只有这样才不会被 widget 边框切平。
+# 窗口多出的透明区在落位/拖拽时按 _default_pos 的 pad 补偿，宠物不会悬空。
+DW, DH = 400.0, 400.0
+DH_CHAR = 340.0     # 角色（含投影）实际用到的画布高度，DH-DH_CHAR 只是给
+                    # 睡眠正圆泡泡的透明余量：落位/回位/缩放时不算可见高度
 # 散步环带：窗口整体贴近屏幕四周边框（窗沿距边 BAND_NEAR..BAND_FAR px），
 # 沿环带边走边不横穿屏幕中央、不挡中间内容
 BAND_NEAR = 26.0        # 环带外沿：窗沿距屏幕边最近
@@ -1710,7 +1717,8 @@ class EjeePet(QWidget):
         点距约 RING_STEP；深度（窗沿距屏幕边）按环周长正弦缓摆于
         [BAND_NEAR, BAND_FAR-8]，路径圆润自然，且整体不进屏幕中央。"""
         g = self._scr_rect()
-        w, h = self.width(), self.height()
+        # 底部那块透明余量不算：散步时宠物脚底才真的贴着屏幕边走
+        w, h = self.width(), self.height() - self._win_pad_b()
         L, T, R, B = g.left(), g.top(), g.right(), g.bottom()
         x0, y0 = L + BAND_NEAR, T + BAND_NEAR
         x1, y1 = R - w - BAND_NEAR, B - h - BAND_NEAR
@@ -1833,7 +1841,7 @@ class EjeePet(QWidget):
         x = self.x() + (self.width() - dlg.width()) // 2
         y = self.y() - dlg.height() - 6
         if y < scr.top() + 8:                      # 头顶放不下就放到下方
-            y = self.y() + self.height() - 20
+            y = self.y() + self.height() - self._win_pad_b() - 20
         x = int(clamp(x, scr.left() + 8, scr.right() - dlg.width() - 8))
         y = int(clamp(y, scr.top() + 8, scr.bottom() - dlg.height() - 8))
         dlg.move(x, y)
@@ -3181,72 +3189,73 @@ class EjeePet(QWidget):
         sa = clamp(self.sleep_amt.v, 0.0, 1.0)
         if sa < 0.05:
             return
-        t, bw, bh = f["t"], f["bw"], f["bh"]
+        t, bh = f["t"], f["bh"]
         wob = 1.0 + 0.022 * math.sin(t * 2.1)          # 轻轻鼓动
-        # 泡泡必须整颗画在 400×340 的画布里：按角色实际占位
-        # （x 49..341 / y 85..318）取椭圆，横向 0.60bw、纵向 0.545bh，
-        # 圆心落在角色中心。原来 ry=0.74bh、圆心 -0.42bh，下沿会跑到
-        # y≈393（比画布底多 50px），底部整段弧被 widget 边界切掉。
-        cxc, cyc = 0.0, -bh * 0.51
-        rx = bw * 0.64 * wob
-        ry = bh * 0.575 / wob
-        rect = QRectF(cxc - rx, cyc - ry, 2 * rx, 2 * ry)
+        # ---- 正圆泡泡：半径取"刚好把角色整个裹住" ----
+        # 角色实际轮廓到圆心 (195,201) 最远 174px（左下鱼鳍），取 rc=180 时
+        # 四周还各留 6~10px 空气；再加呼吸鼓动 wob(±2.2%) 也不出画布：
+        # 左沿 8px、下沿 10px，泡泡整颗正圆、不再被 widget 边框切平。
+        # 画布已加高到 400（见 DW, DH），圆心落在角色中轴 y≈201。
+        cxc, cyc = 0.0, -bh * 0.50
+        rc = 180.0 * wob
+        rect = QRectF(cxc - rc, cyc - rc, 2.0 * rc, 2.0 * rc)
         p.save()
         p.setOpacity(sa)
         p.setPen(Qt.NoPen)
         # ---- 泡泡壁：径向渐变，光源在左上，边缘略亮模拟薄膜 ----
-        g = QRadialGradient(cxc - rx * 0.36, cyc - ry * 0.44, rx * 1.22)
+        g = QRadialGradient(cxc - rc * 0.36, cyc - rc * 0.44, rc * 1.22)
         g.setColorAt(0.00, QColor(255, 255, 255, 44))
         g.setColorAt(0.42, QColor(216, 238, 249, 14))
-        g.setColorAt(0.80, QColor(180, 222, 243, 24))
-        g.setColorAt(1.00, QColor(158, 208, 236, 40))
+        g.setColorAt(0.80, QColor(180, 222, 243, 26))
+        g.setColorAt(1.00, QColor(158, 208, 236, 48))
         p.setBrush(g)
-        p.drawEllipse(QPointF(cxc, cyc), rx, ry)
+        p.drawEllipse(QPointF(cxc, cyc), rc, rc)
         p.setBrush(Qt.NoBrush)
         # ---- 外圈柔光 + 主轮廓（刻意压得很淡：泡泡膜是"几乎看不见的一层"，
         #      太实会像玻璃球把角色关进去；只留一点折射的亮边） ----
-        p.setPen(QPen(QColor(228, 243, 252, 22), 7.0))
+        p.setPen(QPen(QColor(228, 243, 252, 24), 7.0))
         p.drawEllipse(rect)
-        p.setPen(QPen(QColor(255, 255, 255, 62), 2.2))
+        p.setPen(QPen(QColor(255, 255, 255, 80), 2.4))
         p.drawEllipse(rect)
         # ---- 底部聚光弧：光透过泡泡壁在底下汇成一条亮带 ----
-        p.setPen(QPen(QColor(255, 255, 255, 82), 3.0, Qt.SolidLine,
+        p.setPen(QPen(QColor(255, 255, 255, 96), 3.2, Qt.SolidLine,
                       Qt.RoundCap))
         p.drawArc(rect, 52 * 16, 76 * 16)
         # ---- 左上主高光：斜拉的长椭圆白斑 + 一粒小亮点 ----
         p.setPen(Qt.NoPen)
-        p.setBrush(QColor(255, 255, 255, 150))
+        p.setBrush(QColor(255, 255, 255, 168))
         p.save()
-        p.translate(cxc - rx * 0.38, cyc - ry * 0.46)
+        p.translate(cxc - rc * 0.38, cyc - rc * 0.46)
         p.rotate(-28.0)
-        p.drawEllipse(QPointF(0, 0), rx * 0.17, ry * 0.085)
+        p.drawEllipse(QPointF(0, 0), rc * 0.17, rc * 0.075)
         p.restore()
-        p.setBrush(QColor(255, 255, 255, 200))
-        p.drawEllipse(QPointF(cxc - rx * 0.45, cyc - ry * 0.53),
-                      rx * 0.055, ry * 0.045)
+        p.setBrush(QColor(255, 255, 255, 215))
+        p.drawEllipse(QPointF(cxc - rc * 0.45, cyc - rc * 0.53),
+                      rc * 0.050, rc * 0.042)
         # ---- 右下反光短弧 ----
         p.setPen(QPen(QColor(255, 255, 255, 62), 1.8, Qt.SolidLine,
                       Qt.RoundCap))
         p.setBrush(Qt.NoBrush)
         p.drawArc(rect, 344 * 16, 34 * 16)
         # ---- 小泡泡：攀在泡泡壁上 / 浮在旁边的迷你肥皂泡 ----
-        #      (ox, oy 以 rx/ry 为单位，r 为设计 px，ph/sp 定漂浮相位)
-        for ox, oy, r, ph, sp in ((-0.88, 0.30, 5.4, 0.0, 1.6),
-                                  (0.80, -0.60, 4.4, 2.1, 2.2),
-                                  (0.34, -1.06, 3.6, 4.2, 1.4),
-                                  (0.96, 0.50, 3.2, 1.3, 2.6),
-                                  (-0.30, 0.92, 4.8, 3.5, 1.9)):
-            bx = cxc + rx * (ox + 0.045 * math.sin(t * sp + ph))
-            by = cyc + ry * (oy + 0.055 * math.sin(t * sp * 0.8 + ph * 1.7))
+        #      (ox, oy 以 rc 为单位＝圆上的极坐标近似，r 为设计 px，
+        #       ph/sp 定漂浮相位)；全部压 0.95 以内，免得漂出画布
+        for ox, oy, r, ph, sp in ((-0.90, 0.28, 5.8, 0.0, 1.6),
+                                  (0.62, -0.72, 4.8, 2.1, 2.2),
+                                  (0.06, -0.94, 3.9, 4.2, 1.4),
+                                  (0.93, 0.32, 3.4, 1.3, 2.6),
+                                  (-0.24, 0.87, 5.2, 3.5, 1.9)):
+            bx = cxc + rc * (ox + 0.040 * math.sin(t * sp + ph))
+            by = cyc + rc * (oy + 0.050 * math.sin(t * sp * 0.8 + ph * 1.7))
             rr = r * (0.90 + 0.10 * math.sin(t * 2.4 + ph))
             p.setPen(Qt.NoPen)
-            p.setBrush(QColor(210, 234, 248, 30))
+            p.setBrush(QColor(210, 234, 248, 40))
             p.drawEllipse(QPointF(bx, by), rr, rr)
-            p.setPen(QPen(QColor(255, 255, 255, 104), 1.1))
+            p.setPen(QPen(QColor(255, 255, 255, 128), 1.2))
             p.setBrush(Qt.NoBrush)
             p.drawEllipse(QPointF(bx, by), rr, rr)
             p.setPen(Qt.NoPen)
-            p.setBrush(QColor(255, 255, 255, 165))
+            p.setBrush(QColor(255, 255, 255, 190))
             p.drawEllipse(QPointF(bx - rr * 0.32, by - rr * 0.34),
                           rr * 0.26, rr * 0.26)
             p.setBrush(QColor(255, 255, 255, 80))
@@ -4200,17 +4209,24 @@ class EjeePet(QWidget):
                 ag = scr.availableGeometry()
                 nx = clamp(r[0], ag.left(),
                            max(ag.left(), ag.right() - self.width()))
+                # 底部透明区允许溢出屏幕：宠物脚底仍能贴住任务栏
                 ny = clamp(r[1], ag.top(),
-                           max(ag.top(), ag.bottom() - self.height()))
+                           max(ag.top(), ag.bottom() - self.height()
+                               + self._win_pad_b()))
                 self.move(int(nx), int(ny))
                 return
         self._default_pos()
+
+    def _win_pad_b(self):
+        """画布下方那块只给睡眠正圆泡泡的透明区（px）。落位/回位/缩放时
+        不该把它算进"可见高度"，否则宠物会被顶起来悬空。"""
+        return int(round((DH - DH_CHAR) * self.size))
 
     def _default_pos(self):
         scr = QApplication.primaryScreen()
         ag = scr.availableGeometry() if scr else QRectF(0, 0, 1920, 1080)
         self.move(int(ag.right() - self.width() - 40),
-                  int(ag.bottom() - self.height() - 60))
+                  int(ag.bottom() - self.height() + self._win_pad_b() - 60))
 
     # ---------- 开机自动启动（HKCU\...\Run，仅 Windows）----------
     @staticmethod
@@ -4285,7 +4301,9 @@ class EjeePet(QWidget):
         # 屏幕钳制：缩放后窗口完整留在可用区内（小屏放不下时退到贴顶）
         scr = self._scr_rect()
         nx = clamp(nx, scr.left(), max(scr.left(), scr.right() - self.width()))
-        ny = clamp(ny, scr.top(), max(scr.top(), scr.bottom() - self.height()))
+        pad_b = (DH - DH_CHAR) * new    # 底部透明区不计入可见高度
+        ny = clamp(ny, scr.top(),
+                   max(scr.top(), scr.bottom() - self.height() + pad_b))
         if (nx, ny) != (self.x(), self.y()):
             self.move(nx, ny)
         self.size = new

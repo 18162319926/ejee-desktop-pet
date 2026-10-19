@@ -3183,9 +3183,14 @@ class EjeePet(QWidget):
     def _draw_sleep_bubble(self, p, f):
         """设定彩蛋「在泡泡里睡觉」：入睡后把自己裹进一颗透明泡泡，
         随呼吸轻轻鼓动，醒来（sleep_amt 回落）时泡泡跟着淡掉。
-        立体感 = 径向渐变泡泡壁（光源左上）+ 外圈柔光 + 底部聚光弧
-        + 左上主高光 / 右下反光，再缀 5 颗轻轻漂浮的小泡泡。
-        画在身体组内，所以会一起呼吸/翻转；透明度低，不挡表情。"""
+        立体感按真实肥皂泡的构成来堆：
+          ① 泡内极淡水色（上淡下浓）——只有一点点"水感"，不挡表情
+          ② 菲涅尔边：三圈同心描边，越贴边越厚越亮（球感全在这里）
+          ③ 薄膜彩虹：下侧内缘三段低透明度的洋红/青/橘，模拟干涉色
+          ④ 底部穿透光带（宽柔 + 细锐两条）
+          ⑤ 左上主高光（渐变软斑）+ 小亮点
+          ⑥ 13 颗大小不一的卫星小泡，各有自己的漂移相位，攀壁或浮在泡里
+        画在身体组内，所以会一起呼吸/翻转。"""
         sa = clamp(self.sleep_amt.v, 0.0, 1.0)
         if sa < 0.05:
             return
@@ -3194,73 +3199,152 @@ class EjeePet(QWidget):
         # ---- 正圆泡泡：半径取"刚好把角色整个裹住" ----
         # 角色实际轮廓到圆心 (195,201) 最远 174px（左下鱼鳍），取 rc=180 时
         # 四周还各留 6~10px 空气；再加呼吸鼓动 wob(±2.2%) 也不出画布：
-        # 左沿 8px、下沿 10px，泡泡整颗正圆、不再被 widget 边框切平。
+        # 左沿 8px、下沿 10px，泡泡整颗正圆、不再被 widget 边框切掉。
         # 画布已加高到 400（见 DW, DH），圆心落在角色中轴 y≈201。
         cxc, cyc = 0.0, -bh * 0.50
         rc = 180.0 * wob
-        rect = QRectF(cxc - rc, cyc - rc, 2.0 * rc, 2.0 * rc)
+
+        def ring(k):
+            """半径 k*rc 的同心圆（描边用）。"""
+            r_ = rc * k
+            return QRectF(cxc - r_, cyc - r_, 2.0 * r_, 2.0 * r_)
+
+        def arc_band(a0, a1, rad, wmax, steps=30):
+            """沿半径 rad 的一段"两头渐细"的弧带（角度按数学正向，y 向上）。
+            等宽 RoundCap 描边两头是钝的，放大后像贴了一条胶布；
+            用「锥形闭合路径」填充才像泡泡上真正的一道反光。"""
+            outer, inner = [], []
+            for i in range(steps + 1):
+                u = i / steps
+                a = math.radians(a0 + (a1 - a0) * u)
+                w = wmax * math.sin(math.pi * u) ** 0.85
+                ca, sn = math.cos(a), math.sin(a)
+                outer.append(QPointF(cxc + (rad + w) * ca,
+                                     cyc - (rad + w) * sn))
+                inner.append(QPointF(cxc + (rad - w) * ca,
+                                     cyc - (rad - w) * sn))
+            path = QPainterPath()
+            path.moveTo(outer[0])
+            for pt in outer[1:]:
+                path.lineTo(pt)
+            for pt in reversed(inner):
+                path.lineTo(pt)
+            path.closeSubpath()
+            return path
+
         p.save()
         p.setOpacity(sa)
         p.setPen(Qt.NoPen)
-        # ---- 泡泡壁：径向渐变，光源在左上，边缘略亮模拟薄膜 ----
-        g = QRadialGradient(cxc - rc * 0.36, cyc - rc * 0.44, rc * 1.22)
-        g.setColorAt(0.00, QColor(255, 255, 255, 44))
-        g.setColorAt(0.42, QColor(216, 238, 249, 14))
-        g.setColorAt(0.80, QColor(180, 222, 243, 26))
-        g.setColorAt(1.00, QColor(158, 208, 236, 48))
+        p.setBrush(Qt.NoBrush)
+        # ---- ① 泡内水色：径向渐变中心压到左上角外，越靠右下越"厚" ----
+        #      光源侧的膜几乎透明（白），背光侧积成冷蓝，球感来自这层渐变
+        g = QRadialGradient(cxc - rc * 0.42, cyc - rc * 0.48, rc * 1.62)
+        g.setColorAt(0.00, QColor(255, 255, 255, 0))
+        g.setColorAt(0.34, QColor(250, 252, 255, 10))
+        g.setColorAt(0.62, QColor(226, 242, 252, 15))
+        g.setColorAt(0.84, QColor(186, 220, 242, 30))
+        g.setColorAt(0.94, QColor(148, 198, 230, 46))
+        g.setColorAt(1.00, QColor(118, 178, 218, 62))
         p.setBrush(g)
         p.drawEllipse(QPointF(cxc, cyc), rc, rc)
         p.setBrush(Qt.NoBrush)
-        # ---- 外圈柔光 + 主轮廓（刻意压得很淡：泡泡膜是"几乎看不见的一层"，
-        #      太实会像玻璃球把角色关进去；只留一点折射的亮边） ----
-        p.setPen(QPen(QColor(228, 243, 252, 24), 7.0))
-        p.drawEllipse(rect)
-        p.setPen(QPen(QColor(255, 255, 255, 80), 2.4))
-        p.drawEllipse(rect)
-        # ---- 底部聚光弧：光透过泡泡壁在底下汇成一条亮带 ----
-        p.setPen(QPen(QColor(255, 255, 255, 96), 3.2, Qt.SolidLine,
+        # 右下内缘再补一圈宽而淡的冷影：膜越贴近轮廓越厚
+        p.setPen(QPen(QColor(140, 190, 228, 26), 14.0, Qt.SolidLine,
                       Qt.RoundCap))
-        p.drawArc(rect, 52 * 16, 76 * 16)
-        # ---- 左上主高光：斜拉的长椭圆白斑 + 一粒小亮点 ----
+        p.drawArc(ring(0.965), 262 * 16, 128 * 16)
+        # ---- ② 菲涅尔边：三圈同心描边，薄膜在边缘视线穿过的厚度最大 ----
+        for k, w, col in ((0.997, 10.0, QColor(212, 237, 250, 22)),
+                          (0.993, 4.4, QColor(240, 251, 255, 52))):
+            p.setPen(QPen(col, w))
+            p.drawEllipse(ring(k))
+        # 最外那道细线分冷暖两段：左上受光近白、右下折射偏蓝
+        p.setPen(QPen(QColor(255, 255, 255, 152), 1.5, Qt.SolidLine,
+                      Qt.RoundCap))
+        p.drawArc(ring(0.988), 26 * 16, 208 * 16)
+        p.setPen(QPen(QColor(126, 174, 212, 132), 1.5, Qt.SolidLine,
+                      Qt.RoundCap))
+        p.drawArc(ring(0.988), 234 * 16, 152 * 16)
+        # ---- ③ 薄膜彩虹：只在侧下缘，三段低透明度干涉色 ----
+        for a0, span, col, w in ((198, 66, QColor(198, 162, 238, 46), 3.4),
+                                 (246, 34, QColor(250, 206, 168, 34), 3.0),
+                                 (300, 46, QColor(146, 224, 206, 42), 3.4)):
+            p.setPen(QPen(col, w, Qt.SolidLine, Qt.RoundCap))
+            p.drawArc(ring(0.972), a0 * 16, span * 16)
+        # ---- ④ 底部穿透光带：宽而柔的一条 + 贴着膜的细锐线 ----
         p.setPen(Qt.NoPen)
-        p.setBrush(QColor(255, 255, 255, 168))
-        p.save()
-        p.translate(cxc - rc * 0.38, cyc - rc * 0.46)
-        p.rotate(-28.0)
-        p.drawEllipse(QPointF(0, 0), rc * 0.17, rc * 0.075)
-        p.restore()
-        p.setBrush(QColor(255, 255, 255, 215))
-        p.drawEllipse(QPointF(cxc - rc * 0.45, cyc - rc * 0.53),
-                      rc * 0.050, rc * 0.042)
-        # ---- 右下反光短弧 ----
-        p.setPen(QPen(QColor(255, 255, 255, 62), 1.8, Qt.SolidLine,
+        p.setBrush(QColor(255, 255, 255, 34))
+        p.drawPath(arc_band(208, 292, rc * 0.955, rc * 0.030))
+        p.setPen(QPen(QColor(255, 255, 255, 112), 2.2, Qt.SolidLine,
+                      Qt.RoundCap))
+        p.drawArc(ring(0.982), 216 * 16, 60 * 16)
+        # ---- ⑤ 左上主高光：贴着球面的一道弧形反光，两头渐细 ----
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(255, 255, 255, 52))
+        p.drawPath(arc_band(96, 154, rc * 0.944, rc * 0.038))
+        p.setBrush(QColor(255, 255, 255, 138))
+        p.drawPath(arc_band(103, 147, rc * 0.954, rc * 0.021))
+        p.setBrush(QColor(255, 255, 255, 214))
+        p.drawPath(arc_band(110, 140, rc * 0.961, rc * 0.007))
+        # 反光里那粒柔和的镜面点（软心，不描硬边）
+        dgx, dgy = cxc - rc * 0.426, cyc - rc * 0.631
+        dg = QRadialGradient(dgx, dgy, rc * 0.030)
+        dg.setColorAt(0.00, QColor(255, 255, 255, 235))
+        dg.setColorAt(0.34, QColor(255, 255, 255, 110))
+        dg.setColorAt(1.00, QColor(255, 255, 255, 0))
+        p.setBrush(dg)
+        p.drawEllipse(QPointF(dgx, dgy), rc * 0.030, rc * 0.030)
+        # ---- 右侧短反光弧（对面墙的一次反射） ----
+        p.setPen(QPen(QColor(255, 255, 255, 54), 2.6, Qt.SolidLine,
                       Qt.RoundCap))
         p.setBrush(Qt.NoBrush)
-        p.drawArc(rect, 344 * 16, 34 * 16)
-        # ---- 小泡泡：攀在泡泡壁上 / 浮在旁边的迷你肥皂泡 ----
-        #      (ox, oy 以 rc 为单位＝圆上的极坐标近似，r 为设计 px，
-        #       ph/sp 定漂浮相位)；全部压 0.95 以内，免得漂出画布
-        for ox, oy, r, ph, sp in ((-0.90, 0.28, 5.8, 0.0, 1.6),
-                                  (0.62, -0.72, 4.8, 2.1, 2.2),
-                                  (0.06, -0.94, 3.9, 4.2, 1.4),
-                                  (0.93, 0.32, 3.4, 1.3, 2.6),
-                                  (-0.24, 0.87, 5.2, 3.5, 1.9)):
-            bx = cxc + rc * (ox + 0.040 * math.sin(t * sp + ph))
-            by = cyc + rc * (oy + 0.050 * math.sin(t * sp * 0.8 + ph * 1.7))
-            rr = r * (0.90 + 0.10 * math.sin(t * 2.4 + ph))
+        p.drawArc(ring(0.986), 336 * 16, 40 * 16)
+        # ---- ⑥ 卫星小泡：极坐标 (角度, 距圆心的 rc 倍, 半径px, 相位, 速度) ----
+        #      分布在泡壁附近与泡内，尺寸 2.8~13 三档拉开，各自漂移
+        for ang, dist, r, ph, sp in (
+                (152, 0.78, 11.2, 0.0, 1.5), (120, 0.90, 6.2, 1.7, 2.0),
+                (96, 0.66, 4.2, 3.1, 1.3), (70, 0.86, 8.6, 4.4, 1.8),
+                (38, 0.70, 3.6, 5.6, 2.3), (12, 0.90, 6.8, 0.8, 1.6),
+                (-16, 0.60, 3.2, 2.4, 2.1), (-48, 0.82, 13.0, 3.7, 1.4),
+                (-84, 0.90, 5.4, 5.0, 2.4), (-118, 0.74, 8.0, 1.2, 1.7),
+                (-158, 0.86, 4.6, 4.0, 2.2), (-128, 0.46, 2.8, 2.9, 2.6),
+                (170, 0.52, 3.4, 5.9, 1.9)):
+            a_ = math.radians(ang)
+            bx = cxc + rc * (dist * math.cos(a_)
+                             + 0.014 * math.sin(t * sp + ph))
+            by = cyc + rc * (dist * math.sin(a_)
+                             + 0.024 * math.sin(t * sp * 0.72 + ph * 1.7))
+            rr = r * (0.92 + 0.08 * math.sin(t * 1.9 + ph))
+            srect = QRectF(bx - rr, by - rr, 2.0 * rr, 2.0 * rr)
+            # 泡体：中心近透明、贴壁转冷蓝——浅色背景上也读得出是个球
+            sg = QRadialGradient(bx - rr * 0.26, by - rr * 0.28, rr * 1.10)
+            sg.setColorAt(0.00, QColor(255, 255, 255, 24))
+            sg.setColorAt(0.55, QColor(214, 238, 251, 20))
+            sg.setColorAt(0.86, QColor(158, 203, 232, 66))
+            sg.setColorAt(1.00, QColor(120, 172, 212, 104))
             p.setPen(Qt.NoPen)
-            p.setBrush(QColor(210, 234, 248, 40))
+            p.setBrush(sg)
             p.drawEllipse(QPointF(bx, by), rr, rr)
-            p.setPen(QPen(QColor(255, 255, 255, 128), 1.2))
+            # 膜边：左上白（受光）+ 右下冷蓝（折射），两段拼成一整圈
             p.setBrush(Qt.NoBrush)
-            p.drawEllipse(QPointF(bx, by), rr, rr)
+            lw = 0.85 + rr * 0.045
+            p.setPen(QPen(QColor(255, 255, 255, 205), lw))
+            p.drawArc(srect, 96 * 16, 168 * 16)
+            p.setPen(QPen(QColor(126, 172, 210, 165), lw))
+            p.drawArc(srect, 276 * 16, 168 * 16)
+            # 左上高光点
             p.setPen(Qt.NoPen)
-            p.setBrush(QColor(255, 255, 255, 190))
-            p.drawEllipse(QPointF(bx - rr * 0.32, by - rr * 0.34),
-                          rr * 0.26, rr * 0.26)
-            p.setBrush(QColor(255, 255, 255, 80))
-            p.drawEllipse(QPointF(bx + rr * 0.30, by + rr * 0.30),
-                          rr * 0.11, rr * 0.11)
+            p.setBrush(QColor(255, 255, 255, 218))
+            p.drawEllipse(QPointF(bx - rr * 0.34, by - rr * 0.36),
+                          rr * 0.28, rr * 0.28)
+            if rr >= 5.0:              # 大泡才看得出第二点与底部反光
+                p.setBrush(QColor(255, 255, 255, 110))
+                p.drawEllipse(QPointF(bx + rr * 0.30, by + rr * 0.32),
+                              rr * 0.13, rr * 0.13)
+                p.setPen(QPen(QColor(255, 255, 255, 96), 1.1,
+                              Qt.SolidLine, Qt.RoundCap))
+                p.setBrush(Qt.NoBrush)
+                p.drawArc(QRectF(bx - rr * 0.80, by - rr * 0.80,
+                                 rr * 1.60, rr * 1.60), 208 * 16, 60 * 16)
         p.restore()
 
     def _draw_foreground(self, p, f):

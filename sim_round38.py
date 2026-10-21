@@ -728,6 +728,155 @@ def main():
     finally:
         E.PomoDialog = real_dlg
 
+    # ---------- 11. P0-3：饥饿压扁 / 海市蜃楼 / 睡眠泡泡 几何断言 ----------
+    # （纯几何，不依赖底图资源；渲染特定层到离屏 QImage 后量包围盒）
+    print("\n[11] 饥饿压扁 / 海市蜃楼 / 睡眠泡泡 几何")
+    from PySide6.QtGui import QPainter, QImage, QColor
+    from PySide6.QtCore import Qt, QRectF
+
+    def _neutral_pose():
+        return {"breathe": 0.0, "sway": 0.0, "bob": 0.0, "bounce": 0.0,
+                "shake_x": 0.0, "shake_y": 0.0, "lean": 0.0, "swim": 0.0,
+                "sigh": 0.0}
+
+    def _bbox_scan(img, alpha_thr, cond=lambda r, g, b: True, roi=None):
+        # Format_ARGB32 在内存里是 BGRA 字节序：必须转 RGBA8888 才能得到
+        # 真正的 R,G,B,A（否则橙色/灰色会被错判成蓝色，导致漏检）。
+        img = img.convertToFormat(QImage.Format_RGBA8888)
+        data = bytes(img.constBits()[:img.sizeInBytes()])
+        W, H = img.width(), img.height()
+        if roi:
+            rx0, ry0, rx1, ry1 = roi
+        else:
+            rx0, ry0, rx1, ry1 = 0, 0, W - 1, H - 1
+        mnx = mny = 10 ** 9
+        mxx = mxy = -1
+        i = 0
+        n = len(data)
+        while i < n:
+            a = data[i + 3]
+            if a > alpha_thr:
+                px = i // 4
+                x = px % W
+                y = px // W
+                if rx0 <= x <= rx1 and ry0 <= y <= ry1:
+                    r, g, b = data[i], data[i + 1], data[i + 2]
+                    if cond(r, g, b):
+                        if x < mnx:
+                            mnx = x
+                        if y < mny:
+                            mny = y
+                        if x > mxx:
+                            mxx = x
+                        if y > mxy:
+                            mxy = y
+            i += 4
+        if mxx < 0:
+            return None
+        return (mnx, mny, mxx, mxy)
+
+    # ---- 11a. 饥饿：以脚底为支点压扁，脚底几乎不动，头顶往下塌 ----
+    def body_extent(pet, ha):
+        img = QImage(400, 472, QImage.Format_ARGB32)
+        img.fill(0)
+        p = QPainter(img)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        p.scale(pet.width() / E.DW, pet.width() / E.DW)
+        p.translate(0.0, E.PAD_T)
+        pet.facing = 1
+        pet._apply_body_pose(p, _neutral_pose(), {"ha": ha, "sigh": 0.0})
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(255, 0, 0, 255))
+        # 一根竖条：从头顶(-bh)画到脚底(0)，量它的上下沿
+        p.drawRect(QRectF(-2.0, -pet.bh, 4.0, pet.bh))
+        p.end()
+        return _bbox_scan(img, 40)
+
+    ext0 = body_extent(pet, 0.0)
+    ext5 = body_extent(pet, 0.5)
+    ext1 = body_extent(pet, 1.0)
+    ok = ext0 and ext5 and ext1
+    foot_move = abs(ext1[3] - ext0[3]) if ok else 999
+    top_move = (ext1[1] - ext0[1]) if ok else 0
+    check("饥饿：脚底支点基本不动（位移≤5px）", ok and foot_move <= 5.0,
+          "foot_move=%.2f" % foot_move)
+    check("饥饿：身体纵向压扁（头顶下移≥28px）", ok and top_move >= 28.0,
+          "top_move=%.2f" % top_move)
+    mono = (ext0[1] < ext5[1] < ext1[1]) if ok else False
+    check("饥饿：压扁随 ha 单调（头顶 y 递增）", mono,
+          "tops=%s" % ((ext0[1], ext5[1], ext1[1]),))
+
+    # ---- 11b. 海市蜃楼：云朵不出血画布；热气顶端穿出云顶 ----
+    pf = make_pet(app)
+    pf.t = 5.0
+    pf._fantasy = {"t0": pf.t - 1.5}     # HOLD 阶段，fsc≈1
+    fimg = QImage(400, 472, QImage.Format_ARGB32)
+    fimg.fill(0)
+    fp = QPainter(fimg)
+    fp.setRenderHint(QPainter.Antialiasing, True)
+    fp.scale(pf.width() / E.DW, pf.width() / E.DW)
+    fp.translate(0.0, E.PAD_T)
+    pf.facing = 1
+    pf._apply_body_pose(fp, _neutral_pose(), {"ha": 0.0, "sigh": 0.0})
+    pf._draw_fantasy(fp, {"t": pf.t})
+    fp.end()
+    # 云体（奶白）：R>245 & G>240 & B>230 & alpha>200
+    cloud = _bbox_scan(fimg, 200, lambda r, g, b: r > 245 and g > 240 and b > 230)
+    check("海市蜃楼：云朵已渲染", cloud is not None, str(cloud))
+    if cloud:
+        cx0, cy0, cx1, cy1 = cloud
+        check("海市蜃楼：云朵不出画布（左右）", cx0 >= 0 and cx1 <= 399,
+              "x=%d..%d" % (cx0, cx1))
+        check("海市蜃楼：云朵不出画布（上下）", cy0 >= 0 and cy1 <= 471,
+              "y=%d..%d" % (cy0, cy1))
+        # 热气：在云顶之上仍有墨迹（R>150 & B<150 & G<200，排除白云）
+        steam = _bbox_scan(fimg, 40,
+                           lambda r, g, b: r > 150 and b < 150 and g < 200)
+        check("海市蜃楼：热气已渲染", steam is not None, str(steam))
+        if steam:
+            check("海市蜃楼：热气顶端穿出云顶", steam[1] < cy0 - 3,
+                  "steam_top=%d cloud_top=%d" % (steam[1], cy0))
+    # 吐司：暖橙轮廓（R>150 & B<150 & G<220 & alpha>120），量宽并对照眼睛。
+    # 用紧 ROI 只扫云心附近，避免把云朵橙色轮廓(#E8A259)一起抓进来。
+    toast = _bbox_scan(fimg, 120,
+                       lambda r, g, b: r > 150 and b < 150 and g < 220,
+                       roi=(216, 50, 302, 126))
+    ew = pf.eye_pos["eye_l"][2]            # 单眼精灵宽（设计 px）
+    if toast:
+        tw = toast[2] - toast[0]
+        check("海市蜃楼：吐司已渲染", tw > 10, "tw=%d" % tw)
+        check("吐司宽度与眼睛同量级（∈[1.6,3.0]×眼宽）",
+              1.6 * ew <= tw <= 3.0 * ew, "tw=%d eye=%.0f" % (tw, ew))
+        tcx = (toast[0] + toast[2]) / 2.0
+        check("吐司居中于云朵（|dx|≤60）", abs(tcx - (cx0 + cx1) / 2.0) <= 60,
+              "dx=%.0f" % (tcx - (cx0 + cx1) / 2.0))
+    else:
+        check("海市蜃楼：吐司已渲染", False, "no toast pixels")
+
+    # ---- 11c. 睡眠泡泡：正圆 + 不被画布切边 ----
+    ps = make_pet(app)
+    ps.sleep_amt.snap(1.0)
+    simg = QImage(400, 472, QImage.Format_ARGB32)
+    simg.fill(0)
+    sp = QPainter(simg)
+    sp.setRenderHint(QPainter.Antialiasing, True)
+    sp.scale(ps.width() / E.DW, ps.width() / E.DW)
+    sp.translate(0.0, E.PAD_T)
+    ps.facing = 1
+    ps._apply_body_pose(sp, _neutral_pose(), {"ha": 0.0, "sigh": 0.0})
+    ps._draw_sleep_bubble(sp, {"t": 5.0, "bh": ps.bh})
+    sp.end()
+    sb = _bbox_scan(simg, 15)
+    check("睡眠泡泡：已渲染", sb is not None, str(sb))
+    if sb:
+        sw = sb[2] - sb[0]
+        sh = sb[3] - sb[1]
+        check("睡眠泡泡：正圆（|w-h|≤1px）", abs(sw - sh) <= 1.0,
+              "w=%d h=%d" % (sw, sh))
+        check("睡眠泡泡：不被画布切边（四边留白≥0）",
+              sb[0] >= 0 and sb[2] <= 399 and sb[1] >= 0 and sb[3] <= 471,
+              "bbox=%s" % (sb,))
+
     print("\n" + "=" * 52)
     if FAILED:
         print("FAILED %d:" % len(FAILED))

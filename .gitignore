@@ -19,6 +19,8 @@ build_log*.txt
 tools/*
 # 例外：叶子拆分脚本是 assets/leaf*.png、base_body.png 的唯一来源，必须入库
 !tools/make_leaf_assets.py
+# 例外：预览回归工具是每轮验证流程核心（--shot 比对/刷新基线），必须入库
+!tools/check_preview.py
 # 各状态预览图（--shot 生成）与回归基准，仅本地参考
 previews/
 _baseline/

@@ -399,6 +399,9 @@ POMO_MIN_DEF, POMO_MIN_LO, POMO_MIN_HI = 25, 1, 180
 # --shot 预览模式：冻结"跟随鼠标"的视线，让预览图每次渲染完全一致
 # （否则光标位置会带动身体摇摆/眼睛方向，改一行代码前后的截图没法比对）
 PREVIEW_MODE = False
+# 预览模式里每一帧独立的随机种子：让各预览帧的随机流互不干扰
+# （粒子位置/大小/颜色互不影响），改某一帧的粒子构成后其余帧逐字节不变。
+PREVIEW_SEED_BASE = 900000
 OMEGA_SW = 46.0                 # ω 嘴线宽（mouth.png 实测 base 像素，峰顶竖穿）
 OMEGA_COL = "#A34B12"           # ω 嘴线条色（不透明最暗 15% 中位色）
 SLEEP_AFTER = 300.0             # 无交互多少秒进入睡眠
@@ -4943,6 +4946,7 @@ def main():
         pet.t = 0.4
         pet._last_t = 0.4
         pet.grab().save(os.path.join(PREVIEW_DIR, "preview_idle.png"))
+        random.seed(PREVIEW_SEED_BASE + 1)          # 后续帧各自独立随机流
         # happy：面包飞入中段（大张嘴吐舌，ω 精灵已隐藏）
         pet.feed()
         pet._set_state("happy")
@@ -4956,6 +4960,7 @@ def main():
         pet._last_t = 1.1
         pet.phase_t0 = pet.t - 0.33   # 面包飞行至约 60% 处，嘴大张
         pet.grab().save(os.path.join(PREVIEW_DIR, "preview_happy.png"))
+        random.seed(PREVIEW_SEED_BASE + 2)
         snap("angry")
         pet.t = 2.6
         pet._last_t = 2.6
@@ -4963,10 +4968,12 @@ def main():
         pet.t = 2.95
         pet._last_t = 2.95
         pet.grab().save(os.path.join(PREVIEW_DIR, "preview_angry.png"))
+        random.seed(PREVIEW_SEED_BASE + 3)
         snap("surprised")
         pet.t = 4.0
         pet._last_t = 4.0
         pet.grab().save(os.path.join(PREVIEW_DIR, "preview_surprised.png"))
+        random.seed(PREVIEW_SEED_BASE + 4)
         snap("sleep")
         pet.t = 7.0
         pet._last_t = 7.0
@@ -4975,6 +4982,7 @@ def main():
         pet.particles.append(Particle("zzz", pet.BCX + 50,
                                       pet.head_top - 8, pet.t - 2.4))
         pet.grab().save(os.path.join(PREVIEW_DIR, "preview_sleep.png"))
+        random.seed(PREVIEW_SEED_BASE + 5)
         snap("idle")
         pet.particles.clear()
         pet.t = 8.6
@@ -4982,6 +4990,7 @@ def main():
         pet._say("咕噜咕噜～最喜欢被你摸头了！再用橘子尾巴给你比个心哦～", 3.0)
         pet.t = 8.95          # 气泡入场动画完成后截（age=0.35s，全显）
         pet.grab().save(os.path.join(PREVIEW_DIR, "preview_bubble.png"))
+        random.seed(PREVIEW_SEED_BASE + 6)
         snap("idle")
         pet._meta["hunger"] = 12.0
         pet.hungry_amt.snap(1.0)
@@ -4990,6 +4999,7 @@ def main():
         pet._last_t = 10.6
         pet._fantasy = {"t0": pet.t - 0.9}    # 幻想气泡（展示期，放大版海市蜃楼）
         pet.grab().save(os.path.join(PREVIEW_DIR, "preview_hungry.png"))
+        random.seed(PREVIEW_SEED_BASE + 7)
         snap("mischief")
         pet.hungry_amt.snap(0.0)      # 恶作剧预览回到正常体型（不然还是软趴的）
         pet._meta["hunger"] = 80.0
@@ -5013,6 +5023,7 @@ def main():
         pet.t = 12.95
         pet._last_t = 12.95
         pet.grab().save(os.path.join(PREVIEW_DIR, "preview_mischief.png"))
+        random.seed(PREVIEW_SEED_BASE + 8)
         pet.bubble_text = ""
         # 吃撑了：吃饱（>=99）后再喂一口 -> 拒收：鼓肚 + 打嗝
         pet._meta["hunger"] = 100.0
@@ -5025,6 +5036,7 @@ def main():
         pet._say("唔唔，肚子已经圆得装不下了～", 3.0, "round")
         pet.t = 17.11                # 摇到约 1/4 周期（脸甩到最侧）
         pet.grab().save(os.path.join(PREVIEW_DIR, "preview_stuffed.png"))
+        random.seed(PREVIEW_SEED_BASE + 9)
         pet._stuffed.snap(0.0)
         pet._nod_until = 0.0
         pet.bubble_text = ""
@@ -5039,6 +5051,7 @@ def main():
         pet._pomo_end = pet.t + 42.0          # 剩 42 秒 -> 最后一分钟
         pet._pomo_nrv.snap(1.0)
         pet.grab().save(os.path.join(PREVIEW_DIR, "preview_pomo.png"))
+        random.seed(PREVIEW_SEED_BASE + 10)
         # 傲娇躲避：连摸 5 下 -> 直接闪现到别处（无身体形变）+ 别过头 + 傲娇台词（粉色爱心泡）
         snap("shy")
         pet._pomo_end = None           # 关掉番茄钟牌，别挡住气泡
@@ -5051,6 +5064,7 @@ def main():
         pet._say("够、够啦！摸太多次了啦……", 3.0)
         pet.t = 20.35
         pet.grab().save(os.path.join(PREVIEW_DIR, "preview_shy.png"))
+        random.seed(PREVIEW_SEED_BASE + 11)
         # 晕车：蚊香圈眼 + 「要吐泡泡了」（浅绿摇摆泡）
         snap("dizzy")
         pet._dizzy_amt.snap(1.0)
@@ -5067,6 +5081,7 @@ def main():
             pet.particles.append(bp)
         pet.t = 24.35
         pet.grab().save(os.path.join(PREVIEW_DIR, "preview_dizzy.png"))
+        random.seed(PREVIEW_SEED_BASE + 12)
         # 可怜层：盯着掉在地上的面包渣（表情复用 angry：怒眉 + 撇嘴；
         # 气泡换可怜蓝皮肤 + 底缘挂一滴泪——放一枚假残渣让主题解析走到 crumb）
         snap("idle")

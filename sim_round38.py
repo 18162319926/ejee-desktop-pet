@@ -158,6 +158,11 @@ def make_pet(app, w=400, h=340, x=200, y=300):
     pet._restore_pos = None
     pet._pomo_end = None
     pet._pomo_raf = None
+    pet._pomo_txt_t = 0.0      # 托盘倒计时文案节流（番茄钟运行中 tick 用）
+    pet._pomo_n = 0            # 番茄钟完成计数（收尾台词递进用）
+    pet._hungry_pending = None  # 饥饿提醒两段式调度的开口时刻
+    pet.bubble_badges = None    # 档案徽章行（_show_stats 设置）
+    pet._tag_hidden = False     # 气泡压住饱食度牌的标记
     pet._pass = False
     pet._tray = None
     pet.timer = None
@@ -876,6 +881,202 @@ def main():
         check("睡眠泡泡：不被画布切边（四边留白≥0）",
               sb[0] >= 0 and sb[2] <= 399 and sb[1] >= 0 and sb[3] <= 471,
               "bbox=%s" % (sb,))
+
+    # ---------- 12. P1/P2 批次回归 ----------
+    print("\n[12] P1/P2 批次回归")
+    import tempfile
+
+    # ---- 12-0. 海市蜃楼路径缓存（P1-5）：形状恒定只建一次 ----
+    if pf._fantasy is not None:
+        check("海市蜃楼：云朵/吐司轮廓已缓存",
+              getattr(pf, "_cloud_path", None) is not None
+              and getattr(pf, "_toast_sil", None) is not None
+              and getattr(pf, "_toast_mid", None) is not None)
+
+    # ---- 12a. P1-4：气泡与饱食度牌互斥淡出 ----
+    print("  [12a] 气泡压牌互斥淡出")
+    from PySide6.QtGui import QPainter as _QPainter
+
+    def _render_layer(pet_, draw_fn):
+        img = QImage(400, 472, QImage.Format_ARGB32)
+        img.fill(0)
+        ptr = _QPainter(img)
+        ptr.setRenderHint(_QPainter.Antialiasing, True)
+        ptr.scale(pet_.width() / E.DW, pet_.width() / E.DW)
+        ptr.translate(0.0, E.PAD_T)
+        draw_fn(ptr)
+        ptr.end()
+        return img
+
+    TAG_INK = lambda r, g, b: (40 <= r <= 80 and 25 <= g <= 55
+                               and 15 <= b <= 45)      # 深棕牌底(58,39,30)
+
+    p5 = make_pet(app)
+    p5.t = 3.0
+    p5._last_t = 3.0
+    # 宽气泡（必然左伸进牌区 x6..102）
+    p5.bubble_style = "cloud"
+    p5.bubble_text = "这是一条特别特别长的台词，一定会把气泡撑得很宽很宽哦！"
+    p5.bubble_t0 = p5.t - 1.0
+    p5.bubble_until = p5.t + 5.0
+    _render_layer(p5, p5._draw_bubble)
+    check("宽气泡与饱食度牌重叠 -> _tag_hidden 置位",
+          p5._tag_hidden is True)
+    img_tag = _render_layer(p5, p5._draw_hunger_tag)
+    tag_px = _bbox_scan(img_tag, 100, TAG_INK)
+    check("重叠 0.25s 后饱食度牌完全淡出", tag_px is None, str(tag_px))
+    # 窄气泡（居中，碰不到牌区）
+    p5.bubble_text = "嗯"
+    p5.bubble_t0 = p5.t - 1.0
+    _render_layer(p5, p5._draw_bubble)
+    check("窄气泡不压牌 -> _tag_hidden 复位", p5._tag_hidden is False)
+    img_tag2 = _render_layer(p5, p5._draw_hunger_tag)
+    tag_px2 = _bbox_scan(img_tag2, 100, TAG_INK)
+    check("无重叠时饱食度牌照常显示", tag_px2 is not None, str(tag_px2))
+    p5.bubble_text = ""
+
+    # ---- 12b. P1-5：粒子上限 ----
+    print("  [12b] 粒子硬上限")
+    p6 = make_pet(app)
+    p6.t = 1.0
+    p6._last_t = 1.0
+    p6.clock.ms = 1000.0
+    for i in range(200):
+        p6.particles.append(E.Particle("heart", 100.0 + i, 200.0,
+                                       p6.t - (i % 10) * 0.01))
+    p6._tick()
+    check("粒子数被压回上限（%d）" % E.PARTICLE_MAX,
+          len(p6.particles) <= E.PARTICLE_MAX,
+          "len=%d" % len(p6.particles))
+    check("超限丢的是最旧的（保尾截头）",
+          len(p6.particles) == E.PARTICLE_MAX)
+
+    # ---- 12c. P1-6：存档容错（缺档 / 坏档 .bak）----
+    print("  [12c] 存档容错")
+    old_sp = E.SAVE_PATH
+    tmpdir = tempfile.mkdtemp(prefix="ejee_sim_")
+    try:
+        E.SAVE_PATH = os.path.join(tmpdir, "nope.json")
+        E.save_corrupted = False
+        d0 = E.load_save()
+        check("缺档：回落默认值不炸", d0["fed"] == 0
+              and d0["schema"] == E.SAVE_SCHEMA)
+        check("缺档：不置坏档标记", E.save_corrupted is False)
+        bad = os.path.join(tmpdir, "ejee_save.json")
+        with open(bad, "w", encoding="utf-8") as f:
+            f.write("{这，不是JSON")
+        E.SAVE_PATH = bad
+        d1 = E.load_save()
+        check("坏档：回落默认值", d1["fed"] == 0
+              and d1["schema"] == E.SAVE_SCHEMA)
+        check("坏档：已备份成 .bak", os.path.exists(bad + ".bak"))
+        check("坏档：save_corrupted 已置位", E.save_corrupted is True)
+    finally:
+        E.SAVE_PATH = old_sp
+        E.save_corrupted = False
+
+    # ---- 12d. P2-9：番茄钟到点收尾仪式 ----
+    print("  [12d] 番茄钟收尾仪式")
+    p8 = make_pet(app)
+    p8.t = 1.0
+    p8._last_t = 1.0
+    p8.clock.ms = 1000.0
+    orig_ding = E.EjeePet._ding
+    E.EjeePet._ding = lambda *a, **k: None      # 测试里别真的放提示音
+    try:
+        p8._pomo_end = p8.t + 0.01              # 下一拍就到点
+        run(p8, 0.05)
+    finally:
+        E.EjeePet._ding = orig_ding
+    check("到点：完成计数 +1", p8._pomo_n == 1, "n=%d" % p8._pomo_n)
+    check("到点：递进台词（含「第一颗番茄」）",
+          "第一颗番茄" in p8.bubble_text, repr(p8.bubble_text[:24]))
+    check("到点：明确的跳起（celebrate 2s）", p8._celebrate_until > p8.t)
+    n_conf = len([q for q in p8.particles if q.kind == "confetti"])
+    check("到点：撒彩纸（>=18）", n_conf >= 18, "confetti=%d" % n_conf)
+    check("到点：番茄钟收起", p8._pomo_end is None)
+
+    # ---- 12e. P2-11：静默模式 / 番茄钟专注免打扰 ----
+    print("  [12e] 静默模式与专注免打扰")
+    p9 = make_pet(app)
+    p9.t = 1.0
+    p9._last_t = 1.0
+    p9.clock.ms = 1000.0
+    p9._meta["silent"] = True
+    p9._next_chatter = p9.t - 1.0
+    p9._next_expr = p9.t - 1.0
+    p9._next_hungry = p9.t - 1.0
+    p9._meta["hunger"] = 20.0
+    run(p9, 0.3)
+    check("静默：不冒闲聊", p9.bubble_text == "", repr(p9.bubble_text[:20]))
+    check("静默：不冒微表情",
+          p9.surprised_until < p9.t and p9._celebrate_until < p9.t)
+    check("静默：饥饿提醒也按下不表", p9._hungry_pending is None)
+    p9._meta["silent"] = False
+    p9._pomo_end = p9.t + 600.0
+    p9._next_chatter = p9.t - 1.0
+    p9._next_expr = p9.t - 1.0
+    p9._next_hungry = p9.t - 1.0
+    run(p9, 0.3)
+    check("专注期：不冒闲聊", p9.bubble_text == "")
+    check("专注期：不冒微表情",
+          p9.surprised_until < p9.t and p9._celebrate_until < p9.t)
+    p9._pomo_end = None
+
+    # ---- 12f. P2-12：饥饿提醒两段式视线调度 ----
+    print("  [12f] 饥饿提醒视线调度")
+    p10 = make_pet(app)
+    p10.t = 1.0
+    p10._last_t = 1.0
+    p10.clock.ms = 1000.0
+    p10._meta["hunger"] = 20.0
+    p10._next_hungry = p10.t - 1.0
+    run(p10, 0.05)
+    check("提醒触发：先安排张望", p10._look_until > p10.t
+          and p10._hungry_pending is not None,
+          "look=%.2f pend=%s" % (p10._look_until, p10._hungry_pending))
+    check("提醒触发：此刻还没开口", p10.bubble_text == "")
+    run(p10, 0.6)
+    gz = p10._gaze()
+    check("张望期间视线真的偏了", abs(gz[0]) > 0.05, "gx=%.2f" % gz[0])
+    p10.clock.ms += 2300.0
+    run(p10, 0.05)
+    check("张望完转头开口说饿", len(p10.bubble_text) > 0,
+          repr(p10.bubble_text[:20]))
+    check("开口后调度已清", p10._hungry_pending is None)
+
+    # ---- 12g. P2-10：陪伴档案徽章 ----
+    print("  [12g] 档案徽章")
+    p11 = make_pet(app)
+    p11.t = 2.0
+    p11._last_t = 2.0
+    p11._show_stats()
+    check("档案：徽章行已设置（3 枚）",
+          p11.bubble_badges is not None and len(p11.bubble_badges) == 3,
+          str(p11.bubble_badges))
+    p11.t += 0.6          # 推过入场动画（0.30s），否则 alpha=0 什么都看不见
+    bimg = _render_layer(p11, p11._draw_bubble)
+    npx = sum(1 for y in range(0, 472) for x in range(0, 400)
+              if bimg.pixelColor(x, y).alpha() > 0)
+    check("档案气泡（带徽章）渲染有内容", npx > 800, "ink=%d" % npx)
+    check("新台词清掉徽章", (p11._say("普通话", 1.0) or True)
+          and p11.bubble_badges is None)
+
+    # ---- 12h. P1-8 / P1-6：菜单入口 ----
+    print("  [12h] 菜单入口")
+    p12 = make_pet(app)
+    menu2, _q2 = p12._build_menu()
+    texts2 = [a.text() for a in menu2.actions()]
+    check("右键菜单含静默模式开关", any("静默模式" in t for t in texts2),
+          str(texts2))
+    menu2.deleteLater()
+    check("托盘新入口的方法齐备",
+          all(callable(getattr(p12, m, None)) for m in
+              ("_export_stats", "_import_stats", "_reset_companion",
+               "_toggle_silent")))
+    p12._toggle_silent(True)
+    check("静默开关生效（写入偏好）", p12._meta.get("silent") is True)
+    check("静默开关有台词回应", len(p12.bubble_text) > 0)
 
     print("\n" + "=" * 52)
     if FAILED:

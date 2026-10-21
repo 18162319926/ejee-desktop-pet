@@ -183,13 +183,60 @@ from PySide6.QtGui import (QPainter, QColor, QPen, QBrush, QPainterPath,
                            QLinearGradient, QRadialGradient)
 from PySide6.QtWidgets import (QApplication, QWidget, QSystemTrayIcon, QMenu,
                                QDialog, QLabel, QPushButton,
-                               QVBoxLayout, QHBoxLayout)
+                               QVBoxLayout, QHBoxLayout,
+                               QMessageBox, QFileDialog)
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 if getattr(sys, "frozen", False):
     APP_DIR = os.path.dirname(sys.executable)      # exe 所在目录（可写）
 SAVE_PATH = os.path.join(APP_DIR, "ejee_save.json")
 PREVIEW_DIR = os.path.join(APP_DIR, "previews")   # --shot 预览图输出目录
+
+# 存档结构版本号：未来字段迁移的锚点（读档时只记录不校验，兼容旧档）
+SAVE_SCHEMA = 2
+
+# 模块级「上次读档是否遇到坏档」标记：__init__ 里读完后转存到实例，
+# 托盘初始化完成后弹一次气泡提示（避免每次启动都烦人）。
+save_corrupted = False
+
+
+def _to_int(v, dv):
+    """存档字段容错读取：类型不对（脏数据/旧档）回落默认值，不炸启动。"""
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return dv
+
+
+def _to_float(v, dv):
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return dv
+
+
+def load_save():
+    """读存档。文件缺失 = 首次启动（静默用默认值）；
+    文件存在但解析失败 = 档案损坏：把坏档改名 .bak 留底（旧备份被覆盖），
+    回落默认值并置 save_corrupted 标记，托盘起来后提示一次。
+    以前这里是 try/except 全吞——坏档会让 fed/pets/first_seen 静默清零。"""
+    global save_corrupted
+    d = {"schema": SAVE_SCHEMA, "size": 1.0, "last_seen": 0.0,
+         "greet_day": "", "fed": 0, "pets": 0, "hunger": 80.0,
+         "pomo_min": POMO_MIN_DEF, "first_seen": "", "silent": False,
+         "x": None, "y": None}
+    try:
+        with open(SAVE_PATH, "r", encoding="utf-8") as f:
+            d.update(json.load(f))
+    except FileNotFoundError:
+        pass
+    except Exception:
+        save_corrupted = True
+        try:
+            os.replace(SAVE_PATH, SAVE_PATH + ".bak")
+        except OSError:
+            pass
+    return d
 
 
 def res_path(name):
@@ -201,18 +248,6 @@ def res_path(name):
         return p
     alt = os.path.join(base, "assets", name)
     return alt if os.path.exists(alt) else p
-
-
-def load_save():
-    d = {"size": 1.0, "last_seen": 0.0, "greet_day": "", "fed": 0, "pets": 0,
-         "hunger": 80.0, "pomo_min": POMO_MIN_DEF, "first_seen": "",
-         "x": None, "y": None}
-    try:
-        with open(SAVE_PATH, "r", encoding="utf-8") as f:
-            d.update(json.load(f))
-    except Exception:
-        pass
-    return d
 
 
 # 台词库：优先读外置 lines.json（可自定义），缺失时用内置默认
@@ -402,6 +437,12 @@ PREVIEW_MODE = False
 # 预览模式里每一帧独立的随机种子：让各预览帧的随机流互不干扰
 # （粒子位置/大小/颜色互不影响），改某一帧的粒子构成后其余帧逐字节不变。
 PREVIEW_SEED_BASE = 900000
+# 粒子硬上限：晕车吐泡泡 + 果汁 + 彩纸 + 爱心叠加时防止无界增长，
+# 超限丢最旧的（正常玩法远达不到这个量）。
+PARTICLE_MAX = 160
+# 自适应帧率：有戏看（交互/粒子/气泡/走动/特效/番茄钟）30fps，
+# 纯静止呼吸时降到 20fps，减少空转唤醒（呼吸幅度小，20fps 无感）。
+TIMER_FAST_MS, TIMER_SLOW_MS = 33, 50
 OMEGA_SW = 46.0                 # ω 嘴线宽（mouth.png 实测 base 像素，峰顶竖穿）
 OMEGA_COL = "#A34B12"           # ω 嘴线条色（不透明最暗 15% 中位色）
 SLEEP_AFTER = 300.0             # 无交互多少秒进入睡眠
@@ -703,6 +744,18 @@ def _menu_icon(kind, col="#BC7A42"):
         tri.closeSubpath()
         p.drawPath(tri)
         p.restore()
+    elif kind == "mute":                     # 静默模式：小喇叭 + 斜杠
+        sp = QPainterPath()
+        sp.moveTo(3.2, 7.2)
+        sp.lineTo(6.2, 7.2)
+        sp.lineTo(9.6, 4.2)
+        sp.lineTo(9.6, 13.8)
+        sp.lineTo(6.2, 10.8)
+        sp.lineTo(3.2, 10.8)
+        sp.closeSubpath()
+        p.drawPath(sp)
+        p.setPen(QPen(c, 1.5, Qt.SolidLine, Qt.RoundCap))
+        p.drawLine(QPointF(11.6, 5.8), QPointF(15.0, 12.2))
     elif kind == "slider":                   # 时长设置：双滑杆
         p.drawLine(QPointF(3.2, 6.3), QPointF(14.8, 6.3))
         p.drawLine(QPointF(3.2, 11.7), QPointF(14.8, 11.7))
@@ -1294,15 +1347,17 @@ class EjeePet(QWidget):
         self.setMouseTracking(True)      # 悬停唤醒睡眠（mouseMoveEvent）
 
         data = load_save()
+        self._save_corrupted = save_corrupted    # 坏档提示（托盘起来后弹一次）
         self.size = clamp(float(data.get("size", 1.0)), SIZE_MIN, SIZE_MAX)
         self.resize(int(DW * self.size), int(DH * self.size))
 
         # ---- 记性（昼夜节律/陪伴统计）----
-        self._meta = {"last_seen": float(data.get("last_seen") or 0.0),
+        self._meta = {"last_seen": _to_float(data.get("last_seen"), 0.0),
                       "greet_day": str(data.get("greet_day", "")),
-                      "fed": int(data.get("fed", 0)),
-                      "pets": int(data.get("pets", 0)),
-                      "first_seen": str(data.get("first_seen") or "")}
+                      "fed": _to_int(data.get("fed"), 0),
+                      "pets": _to_int(data.get("pets"), 0),
+                      "first_seen": str(data.get("first_seen") or ""),
+                      "silent": bool(data.get("silent", False))}
         if not self._meta["first_seen"]:
             # 首次启动（或旧存档迁移）：把今天记为相识日，立刻落盘
             self._meta["first_seen"] = time.strftime("%Y-%m-%d")
@@ -1315,6 +1370,7 @@ class EjeePet(QWidget):
         self._lines = load_lines()
         self._next_chatter = random.uniform(*IDLE_CHATTER_EVERY)   # 首次闲聊 1.5-3 分钟后
         self._pomo_end = None         # 番茄钟结束时刻（self.t 基准）
+        self._pomo_n = 0              # 本次运行完成的番茄钟个数（收尾台词递进）
         self._pomo_txt_t = 0.0        # 托盘倒计时文案节流
         self._pomo_total = 25 * 60.0  # 本段番茄钟总时长（进度环用）
         self._pomo_nrv = Spring(0.0, 90, 12)   # 最后一分钟的紧张度 0..1
@@ -1336,6 +1392,7 @@ class EjeePet(QWidget):
         # ---- 轻量饱食度（第二档⑥）：无惩罚，饿了会提醒 ----
         self._meta["hunger"] = self._load_hunger(data)
         self._next_hungry = random.uniform(60, 120)
+        self._hungry_pending = None   # 饥饿提醒的两段式调度（先张望再开口）
 
         # ---- Shift+滚轮 缩放（弹簧缓动 + 光标锚点）----
         self.target_size = self.size
@@ -1447,6 +1504,8 @@ class EjeePet(QWidget):
         self.bubble_until = 0.0
         self.bubble_t0 = 0.0         # 本条气泡出生时刻（驱动入场/退场动画）
         self.bubble_style = "cloud"  # 框型：cloud/burst/round/zzz
+        self.bubble_badges = None    # 陪伴档案徽章行（_show_stats 设置）
+        self._tag_hidden = False     # 气泡压住饱食度牌时置 True（牌淡出让位）
         self._next_drag_line = 0.0   # 拖拽台词冷却
         self._next_zoom_line = 0.0   # 缩放台词冷却
         self._zoom_from = 1.0        # 本次缩放手势起始尺寸
@@ -1518,6 +1577,7 @@ class EjeePet(QWidget):
         self.bubble_t0 = self.t
         self.bubble_until = self.t + dur
         self.bubble_style = style
+        self.bubble_badges = None    # 新台词不带徽章（档案徽章只在档案气泡）
         # 短促的情绪台词更贴合的框型自动改写（只改框不改词）
         if style == "cloud":
             if self.state == "angry":
@@ -1550,7 +1610,8 @@ class EjeePet(QWidget):
 
     def _show_stats(self):
         """陪伴档案（托盘菜单）：EJEE 用自己的话汇报这些日子的陪伴——
-        认识多久、喂过几次、摸过几次、现在肚子什么状况。"""
+        认识多久、喂过几次、摸过几次、现在肚子什么状况。
+        文案下方画一排小徽章（天数/喂食/摸头），给长期陪伴一点收集感。"""
         self._touch()                       # 睡着也能被点醒看档案
         days = self._companion_days()
         hug = self._meta.get("hunger", 0.0)
@@ -1560,6 +1621,11 @@ class EjeePet(QWidget):
                % (days, self._meta.get("fed", 0), self._meta.get("pets", 0),
                   int(round(hug)), mood))
         self._say(txt, 6.0)
+        # 徽章行：星星=天数 · 面包=喂食 · 爱心=摸头（绘制见 _draw_stat_badges）
+        self.bubble_badges = [
+            ("day", self._companion_days()),
+            ("feed", _to_int(self._meta.get("fed"), 0)),
+            ("pat", _to_int(self._meta.get("pets"), 0))]
 
     def _pat(self):
         """摸头：眯眼开心 + 爱心 + 台词。**连续摸 5 下会被摸烦**——
@@ -2056,12 +2122,21 @@ class EjeePet(QWidget):
             if rem <= 0:
                 self._pomo_end = None
                 self._pomo_text("番茄钟 %d 分钟" % self._pomo_min())
-                self._celebrate_until = self.t + 1.5
-                self._sq.kick(2.4)
-                self._say(self._line("pomo_done"), 4.0)
-                for i in range(12):
+                # 收尾仪式：台词按本次完成的番茄数递进 + 一次明确的跳起
+                self._pomo_n += 1
+                n = self._pomo_n
+                if n <= 1:
+                    cheer = "第一颗番茄收成啦！跳一个庆祝～"
+                elif n <= 3:
+                    cheer = "第 %d 颗番茄收成！去喝口水休息下。" % n
+                else:
+                    cheer = "连续 %d 颗番茄了，你也太厉害了吧！" % n
+                self._celebrate_until = self.t + 2.0
+                self._sq.kick(3.2)          # 跳起（比随机庆祝更猛的一下）
+                self._say(cheer, 4.0)
+                for i in range(18):
                     self.particles.append(Particle(
-                        "confetti", self.BCX + random.uniform(-60, 60),
+                        "confetti", self.BCX + random.uniform(-70, 70),
                         self.head_top + random.uniform(-4, 20), self.t))
                 self._ding()
             elif self.t - self._pomo_txt_t > 15:
@@ -2176,9 +2251,12 @@ class EjeePet(QWidget):
         # 持续小碎步 / 缩身（用户要求不做形变，闪现即可）。
         self._shy_amt.step(0.0, dt)
 
-        # 待机闲聊：平静时每 4-8 分钟冒一句时段台词（穿透模式不打扰）
+        # 待机闲聊：平静时每 4-8 分钟冒一句时段台词（穿透模式不打扰；
+        # 番茄钟专注期与静默模式也闭嘴——免打扰）
         if (self.state == "idle" and not self._pass
                 and self.phase == "idle"
+                and self._pomo_end is None
+                and not self._meta.get("silent")
                 and self.t >= self._post_lock
                 and self.bubble_until < self.t
                 and self.t >= self._next_chatter):
@@ -2188,16 +2266,29 @@ class EjeePet(QWidget):
         # ---- 饱食度：非线性衰减（越低掉得越快，全程 3 小时），饿了提醒 ----
         self._meta["hunger"] = clamp(
             self._hunger_after(self._meta.get("hunger", 80.0), dt), 0.0, 100.0)
+        # 饥饿提醒（两段式）：先扭头看一眼别处（复用张望微动作的视线调度），
+        # 2.2s 后视线转回你身上再开口——比凭空弹气泡自然；
+        # 专注期 / 静默模式下不打扰。
         if (self._meta["hunger"] < 30.0 and self.state == "idle"
                 and not self._pass and self.phase == "idle"
+                and self._pomo_end is None
+                and not self._meta.get("silent")
                 and self.bubble_until < self.t
                 and self.t >= self._next_hungry):
             self._next_hungry = self.t + random.uniform(240, 420)
-            txt = self._line("hungry")
-            if self._meta["hunger"] < 10.0:
-                txt = "真的好饿……" + txt
-            self._say(txt, 3.0)
-            self._sq.kick(-0.6)
+            self._look_dir = random.choice((-1.0, 1.0))
+            self._look_until = self.t + 2.2
+            self._hungry_pending = self.t + 2.2
+        if (self._hungry_pending is not None
+                and self.t >= self._hungry_pending):
+            self._hungry_pending = None
+            if (self._meta["hunger"] < 30.0 and self.state == "idle"
+                    and self.phase == "idle" and self.bubble_until < self.t):
+                txt = self._line("hungry")
+                if self._meta["hunger"] < 10.0:
+                    txt = "真的好饿……" + txt
+                self._say(txt, 3.0)
+                self._sq.kick(-0.6)
 
         # 周期存档：last_seen 每 60s 刷新（昼夜问候与回来时长判定用）
         if time.time() - self._save_t > 60.0:
@@ -2386,9 +2477,12 @@ class EjeePet(QWidget):
         # 随机微表情调度（30~60s 一次，短促惊讶或庆祝，1.3s 后回 idle）；
         # 饥饿时保持可怜的虚弱态，不再间歇切换表情；
         # 用户操作引发的状态刚结束（_post_lock 内）也先按住不冒；
+        # 番茄钟专注期 / 静默模式同样免打扰；
         # 10% 概率顺带自言自语一句（pet/hungry 池），没人理也鲜活
         if self.state == "idle" and self.phase == "idle" \
                 and self.hungry_amt.v < 0.5 \
+                and self._pomo_end is None \
+                and not self._meta.get("silent") \
                 and self.t >= self._post_lock \
                 and self.t >= self._next_expr:
             if random.random() < 0.5:
@@ -2466,8 +2560,29 @@ class EjeePet(QWidget):
             # 在全局坐标里绘制，能飞出宠物自己的小窗口，360° 无边界。
             alive.append(pt)
         self.particles = alive
+        # 硬上限：晕车吐泡泡 + 果汁 + 彩纸 + 爱心全叠在一起也不会无界增长，
+        # 超限从头部丢最旧的（append 顺序即出生顺序）
+        if len(self.particles) > PARTICLE_MAX:
+            del self.particles[:len(self.particles) - PARTICLE_MAX]
         if self.floats:
             self.floats = [f for f in self.floats if self.t - f[3] < 1.2]
+        # 自适应帧率：有戏看保持 30fps，纯静止呼吸降到 20fps（省空转唤醒）。
+        # 预览/仿真不走 QTimer（scaffold 里 timer=None），跳过。
+        if self.timer is not None:
+            busy = bool(self.particles or self.floats or self.bubble_text
+                        or self.bubble_badges
+                        or self._glide or self._wander or self._flee
+                        or self._dragging or self._bread is not None
+                        or self._fantasy is not None or self._zooming
+                        or self.state != "idle" or self.phase != "idle"
+                        or self._pomo_end is not None
+                        or self.t < self.mischief_until
+                        or self.t < self._dizzy_until
+                        or self.t < self._nod_until
+                        or self.t < self._shy_until)
+            want = TIMER_FAST_MS if busy else TIMER_SLOW_MS
+            if self.timer.interval() != want:
+                self.timer.setInterval(want)
         self.update()
 
     def _rand_blink_delay(self):
@@ -3159,15 +3274,21 @@ class EjeePet(QWidget):
                 # 「云猛放大 + 急速淡出」和 _tick 里喷出的 4 颗 bubble 碎屑。
                 p.save()
                 p.scale(1.45, 1.45)
-                cloud = QPainterPath()
-                cloud.addEllipse(QPointF(0, 2), 40, 30)
-                for (bx, by, br) in ((-22, -26, 16), (2, -32, 18),
-                                     (22, -24, 15), (-36, 4, 12),
-                                     (38, 1, 11), (-22, 28, 14),
-                                     (24, 27, 12)):
-                    bump = QPainterPath()
-                    bump.addEllipse(QPointF(bx, by), br, br)
-                    cloud = cloud.united(bump)
+                # 云朵轮廓恒定不变（只整体缩放），缓存为实例属性——
+                # 7 次 QPainterPath.united() 每帧重算纯属浪费。
+                # 用 getattr 惰性构建：仿真的 scaffold 宠物不走 __init__。
+                cloud = getattr(self, "_cloud_path", None)
+                if cloud is None:
+                    cloud = QPainterPath()
+                    cloud.addEllipse(QPointF(0, 2), 40, 30)
+                    for (bx, by, br) in ((-22, -26, 16), (2, -32, 18),
+                                         (22, -24, 15), (-36, 4, 12),
+                                         (38, 1, 11), (-22, 28, 14),
+                                         (24, 27, 12)):
+                        bump = QPainterPath()
+                        bump.addEllipse(QPointF(bx, by), br, br)
+                        cloud = cloud.united(bump)
+                    self._cloud_path = cloud
                 # 投影：右下轻偏移的一层柔影，做出一点空气感
                 p.setPen(Qt.NoPen)
                 p.setBrush(QColor(140, 95, 50, 30))
@@ -3229,8 +3350,12 @@ class EjeePet(QWidget):
                     pth.closeSubpath()
                     return pth
 
-                sil = toast_path(0.0)       # 烤边壳轮廓
-                mid = toast_path(4.4)       # 面包心轮廓
+                sil = getattr(self, "_toast_sil", None)
+                if sil is None:             # 吐司轮廓同样恒定：缓存（见上）
+                    sil = toast_path(0.0)       # 烤边壳轮廓
+                    self._toast_sil = sil
+                    self._toast_mid = toast_path(4.4)   # 面包心轮廓
+                mid = self._toast_mid
 
                 # ① 烤边壳：焦黄渐变（上浅下深）
                 crg = QLinearGradient(0.0, TCY - TH, 0.0, TCY + TH)
@@ -3581,9 +3706,17 @@ class EjeePet(QWidget):
 
     def _draw_hunger_tag(self, p):
         """饱食度牌：左上侧小深棕牌（面包图标 + 进度条 + 数值）。
-        >50 橙 / 30-50 黄 / <30 红，随饥饿程度变色。"""
+        >50 橙 / 30-50 黄 / <30 红，随饥饿程度变色。
+        气泡压到牌（_draw_bubble 置 _tag_hidden）时优先台词：
+        牌在气泡出生后 0.25s 内淡到 0，气泡收了再回来。"""
         hg = self._meta.get("hunger", 80.0)
+        alpha = 1.0
+        if getattr(self, "_tag_hidden", False):
+            alpha = 1.0 - clamp((self.t - self.bubble_t0) / 0.25, 0.0, 1.0)
+            if alpha <= 0.01:
+                return
         p.save()
+        p.setOpacity(alpha)
         p.setPen(Qt.NoPen)
         p.setBrush(QColor(58, 39, 30, 228))
         p.drawRoundedRect(QRectF(6, 16, 96, 32), 10, 10)
@@ -4080,6 +4213,7 @@ class EjeePet(QWidget):
         统一：幼圆字体（生气用加粗硬体）、上亮下沉渐变、左上高光、
         easeOutBack 弹性放大淡入 + 淡出，文字自适应换行。"""
         if not self.bubble_text or self.t > self.bubble_until:
+            self._tag_hidden = False      # 没气泡：饱食度牌照常显示
             return
         style = self.bubble_style
         th = self._bubble_theme()
@@ -4156,8 +4290,17 @@ class EjeePet(QWidget):
         if style == "round":
             # 圆形泡泡：正文改为竖排不换行的窄条（泡泡框本身就窄）
             w = max(72.0, min(w, 150.0))
+        # 陪伴档案徽章行：气泡底部多留一行高度（绘制在文字下方）
+        badges = getattr(self, "bubble_badges", None)
+        if badges:
+            h += 26.0
         y_b = 64.0                                   # 气泡底边（尾巴根）
         bx = clamp(self.BCX - w / 2.0, 10.0, DW - 10.0 - w)
+        # 饱食度牌 (6,16,96,32) 与气泡的水平投影相交时整块让位——
+        # 台词优先（牌在 _draw_hunger_tag 里按气泡出生后 0.25s 淡出）
+        self._tag_hidden = bool(
+            bx < 102.0 and bx + w > 6.0
+            and (y_b - h - 8.0) < 48.0 and (y_b + 15.0) > 16.0)
 
         # 框型（配色全部来自主题）
         if style == "burst":
@@ -4236,10 +4379,60 @@ class EjeePet(QWidget):
             p.drawArc(rr_, 296 * 16, 22 * 16)
         p.setFont(f)
         p.setPen(QPen(INK))
-        p.drawText(QRectF(bx + 15, y_b - h, w - 30, h),
-                   Qt.AlignHCenter | Qt.AlignVCenter | Qt.TextWordWrap,
-                   self.bubble_text)
+        if badges:
+            # 有徽章行：文字占上部，徽章画在底部那一条里
+            p.drawText(QRectF(bx + 15, y_b - h, w - 30, h - 26.0),
+                       Qt.AlignHCenter | Qt.AlignVCenter | Qt.TextWordWrap,
+                       self.bubble_text)
+            self._draw_stat_badges(p, bx, y_b, w, badges)
+        else:
+            p.drawText(QRectF(bx + 15, y_b - h, w - 30, h),
+                       Qt.AlignHCenter | Qt.AlignVCenter | Qt.TextWordWrap,
+                       self.bubble_text)
         p.restore()
+
+    def _draw_stat_badges(self, p, bx, y_b, w, badges):
+        """陪伴档案徽章行：星星=陪伴天数 · 面包=喂食次数 · 爱心=摸头次数。
+        画在气泡底部留出的那一行里（_draw_bubble 已把 h 加高 26px）。"""
+        n = len(badges)
+        if n == 0:
+            return
+        seg = w / n
+        cy = y_b - 13.0
+        f = QFont()
+        f.setPixelSize(12)
+        f.setBold(True)
+        p.setFont(f)
+        for i, (kind, val) in enumerate(badges):
+            cx = bx + seg * (i + 0.5)
+            if kind == "day":                # 小星星（奶油黄）
+                p.setPen(Qt.NoPen)
+                p.setBrush(QColor("#F6C24E"))
+                star = QPainterPath()
+                for k in range(10):
+                    rr = 6.2 if k % 2 == 0 else 2.8
+                    ang = -math.pi / 2.0 + k * math.pi / 5.0
+                    pt = QPointF(cx - 8.0 + math.cos(ang) * rr,
+                                 cy + math.sin(ang) * rr)
+                    if k == 0:
+                        star.moveTo(pt)
+                    else:
+                        star.lineTo(pt)
+                star.closeSubpath()
+                p.drawPath(star)
+            elif kind == "feed":             # 小面包（同饱食度牌的画法）
+                p.setPen(Qt.NoPen)
+                p.setBrush(QColor(238, 186, 120))
+                p.drawEllipse(QPointF(cx - 8.0, cy), 6.2, 4.8)
+                p.setBrush(QColor(214, 160, 96))
+                p.drawEllipse(QPointF(cx - 8.0, cy - 2.2), 3.2, 1.7)
+            else:                            # 小爱心
+                p.setPen(Qt.NoPen)
+                p.setBrush(QColor(HEARTS[0]))
+                p.drawPath(self._heart_path(cx - 8.0, cy, 6.0))
+            p.setPen(QPen(INK))
+            p.drawText(QRectF(cx + 1.0, cy - 9.0, seg - 10.0, 18.0),
+                       Qt.AlignLeft | Qt.AlignVCenter, str(val))
 
     # ================= 互动 =================
     def _touch(self):
@@ -4678,6 +4871,87 @@ class EjeePet(QWidget):
             self._press_pos = None
             self._dragging = False
 
+    # ---- 静默模式 / 陪伴档案的导出导入与重置（托盘菜单入口）----
+    def _toggle_silent(self, on):
+        """静默模式：不冒自发气泡（闲聊/饥饿提醒/微表情自言自语），
+        用户主动互动的回应与番茄钟到点提醒不受影响。偏好随存档记。"""
+        self._meta["silent"] = bool(on)
+        self._save()
+        if self._meta["silent"]:
+            self._say("好～静默模式，我安静陪着你不说话。", 2.6)
+        else:
+            self._say("叽！静默模式关掉啦。", 2.2)
+        # 同步托盘菜单开关（与 _toggle_pass 同一套对齐方式）
+        if getattr(self, "tray_act_silent", None) is not None:
+            self.tray_act_silent.setProperty("_switchOn", self._meta["silent"])
+            if getattr(self, "_tray_menu", None) is not None:
+                self._tray_menu.update()
+
+    def _export_stats(self):
+        """导出陪伴档案：把 meta（喂食/摸头/相识日/饱食度等）写成 JSON。"""
+        path, _ = QFileDialog.getSaveFileName(
+            self, "导出陪伴档案",
+            os.path.join(os.path.expanduser("~"), "ejee_陪伴档案.json"),
+            "JSON (*.json)")
+        if not path:
+            return
+        d = {"schema": SAVE_SCHEMA}
+        d.update(self._meta)
+        d["exported"] = time.strftime("%Y-%m-%d %H:%M")
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(d, f, ensure_ascii=False, indent=1)
+        except OSError:
+            self._say("呜……档案没能写出去。", 2.6)
+            return
+        self._say("档案打包好啦，记得收好哦。", 2.8)
+
+    def _import_stats(self):
+        """导入陪伴档案：只认陪伴数据（喂食/摸头/相识日/饱食度/番茄钟时长），
+        窗口位置与大小不跟档案走。字段逐个容错，坏档不炸。"""
+        path, _ = QFileDialog.getOpenFileName(self, "导入陪伴档案", "",
+                                              "JSON (*.json)")
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                d = json.load(f)
+            if not isinstance(d, dict):
+                raise ValueError("not a dict")
+        except Exception:
+            self._say("这个文件读不出来……是档案吗？", 2.6)
+            return
+        self._meta["fed"] = _to_int(d.get("fed"), self._meta.get("fed", 0))
+        self._meta["pets"] = _to_int(d.get("pets"), self._meta.get("pets", 0))
+        self._meta["hunger"] = clamp(
+            _to_float(d.get("hunger"), 80.0), 0.0, 100.0)
+        fs = str(d.get("first_seen") or "")
+        if fs:
+            self._meta["first_seen"] = fs
+        pm = _to_int(d.get("pomo_min"), self._meta.get("pomo_min",
+                                                       POMO_MIN_DEF))
+        self._meta["pomo_min"] = clamp(pm, POMO_MIN_LO, POMO_MIN_HI)
+        self._save()
+        self._say("欢迎回来，这些日子我都记起来啦！", 3.2)
+
+    def _reset_companion(self):
+        """重置陪伴数据（带确认）：清空喂食/摸头/相识日，饱食度回满；
+        窗口位置与大小保留。以前用户只能手删存档文件。"""
+        ret = QMessageBox.question(
+            self, "重置陪伴数据",
+            "要清空喂食、摸头和相识日这些陪伴记录吗？\n"
+            "（窗口位置与大小会保留，操作不可撤销）",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if ret != QMessageBox.Yes:
+            return
+        self._meta["fed"] = 0
+        self._meta["pets"] = 0
+        self._meta["hunger"] = 80.0
+        self._meta["first_seen"] = time.strftime("%Y-%m-%d")
+        self._meta["greet_day"] = ""
+        self._save()
+        self._say("记忆清空啦……我们、重新认识一下吧？", 3.6)
+
     def _build_menu(self):
         """构建共享右键菜单（窗口右键 / 穿透模式全局右键钩子共用）。
         每次弹出重建，状态（穿透勾选、当前尺寸）自然是最新的。"""
@@ -4694,6 +4968,12 @@ class EjeePet(QWidget):
         act_pass.setProperty("_switchOn", self._pass)
         act_pass.triggered.connect(
             lambda checked=False: self._toggle_pass(not self._pass))
+        act_silent = menu.addAction(_menu_icon("mute"), "静默模式")
+        act_silent.setProperty("_switch", True)
+        act_silent.setProperty("_switchOn", bool(self._meta.get("silent")))
+        act_silent.triggered.connect(
+            lambda checked=False: self._toggle_silent(
+                not self._meta.get("silent")))
         size_menu = SoftMenu(menu)
         size_menu.setTitle("尺寸")
         size_menu.setIcon(_menu_icon("size"))
@@ -4859,11 +5139,25 @@ class EjeePet(QWidget):
         act_pass.triggered.connect(
             lambda checked=False: self._toggle_pass(not self._pass))
         self.tray_act_pass = act_pass   # _toggle_pass 里同步开关状态
+        act_silent = menu.addAction(_menu_icon("mute"), "静默模式")
+        act_silent.setProperty("_switch", True)
+        act_silent.setProperty("_switchOn", bool(self._meta.get("silent")))
+        act_silent.triggered.connect(
+            lambda checked=False: self._toggle_silent(
+                not self._meta.get("silent")))
+        self.tray_act_silent = act_silent   # _toggle_silent 里同步开关状态
         self._tray_menu = menu
         menu.addAction(_menu_icon("eye"), "显示 / 隐藏").triggered.connect(
             self._toggle_visible)
         act_reset = menu.addAction(_menu_icon("reset"), "重置大小 1.0x")
         act_reset.triggered.connect(lambda checked=False: self.set_size(1.0))
+        menu.addSeparator()
+        menu.addAction(_menu_icon("star"), "导出陪伴档案…").triggered.connect(
+            self._export_stats)
+        menu.addAction(_menu_icon("bread"), "导入陪伴档案…").triggered.connect(
+            self._import_stats)
+        menu.addAction(_menu_icon("reset"), "重置陪伴数据…").triggered.connect(
+            self._reset_companion)
         menu.addSeparator()
         act_boot = menu.addAction(_menu_icon("star"), "开机自动启动")
         act_boot.setProperty("_switch", True)
@@ -4893,6 +5187,9 @@ class EjeePet(QWidget):
                 act.setIcon(_menu_icon("radio_on" if on else "radio_off"))
             if self.tray_act_pass is not None:
                 self.tray_act_pass.setProperty("_switchOn", self._pass)
+            if getattr(self, "tray_act_silent", None) is not None:
+                self.tray_act_silent.setProperty(
+                    "_switchOn", bool(self._meta.get("silent")))
             if getattr(self, "tray_act_boot", None) is not None:
                 self.tray_act_boot.setProperty("_switchOn",
                                                self._get_autostart())
@@ -4904,6 +5201,12 @@ class EjeePet(QWidget):
         self.tray.setToolTip("EJEE 伊吉 · ISFP · 来自日山湖水公园\n"
                              "爱好：在泡泡里睡觉｜最爱：牛奶吐司｜吧嗒吧嗒～")
         self.tray.show()
+        # 启动时发现坏档（load_save 已把坏档备份成 .bak）：提示一次
+        if getattr(self, "_save_corrupted", False):
+            self.tray.showMessage(
+                "EJEE 存档已损坏",
+                "坏档已备份为 ejee_save.json.bak，陪伴数据已重置。",
+                QSystemTrayIcon.Warning, 6000)
 
 
 class _PreviewCrumb:
@@ -4919,6 +5222,11 @@ def main():
     if shot:
         os.makedirs(PREVIEW_DIR, exist_ok=True)
         random.seed(20261017)      # 相位/微动作初值也固定，截图才能逐像素比对
+    # 高分屏：缩放策略显式声明为 PassThrough（Qt6 默认值，写明防候选默认变
+    # 化）——125%/150% 系统缩放下不把窗口圆整到整数倍，桌宠边缘不发虚。
+    # 注意：预览基线仍必须在 DPR=1 环境生成（tools/check_preview.py 有硬断言）。
+    QApplication.setHighDpiScaleFactorRoundingPolicy(
+        Qt.HighDpiScaleFactorRoundingPolicy.PassThrough)
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)
     pet = EjeePet()

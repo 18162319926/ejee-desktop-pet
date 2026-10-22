@@ -299,9 +299,6 @@ DEFAULT_LINES = {
     "zoom": ["变大啦！", "这个尺寸刚刚好！"],
     "double_click": ["砰！回到原样啦！", "还是这个大小最舒服。"],
     "mischief": ["嘿嘿，中计了吧！", "尝尝我的橘子汁攻击！"],
-    # 点尾巴（温和反应，不弹开不躲避）
-    "tail_poke": ["尾巴痒痒的，不要戳嘛……", "尾巴抖了一下！吧嗒～",
-                  "再戳……也不会喷橘子汁的哦。"],
     "stuffed": ["吃不下了……嗝。", "肚子圆圆的，让我歇一会儿嘛。",
                 "再吃就要变成橘子了……"],
     "stuffing": ["嗝——！吃撑了，先不吃了……", "唔，好饱，肚子鼓起来了。"],
@@ -1091,19 +1088,11 @@ class EjeePet(EjeePaintMixin, QWidget):
         self._sq.kick(-1.4)                      # 起跑先蹲一下
         self._say(self._line("runaway"), 2.0)
 
-    def _tail_poke(self):
-        """点尾巴：温和反应——尾巴轻轻一甩 + 一句话，不弹开、不喷汁、
-        不溜走。2026-10-22 用户裁决：靠近尾巴不要躲避。
-        （原 _mischief 恶作剧连招保留为死代码，日后想恢复改一行即可。）"""
-        self._touch()
-        self._mis_tail.snap(0.8)      # 尾巴甩一下（弹簧自然衰减）
-        self._sq.kick(0.5)
-        self._say(self._line("tail_poke"), 2.6)
-
     def _mischief(self):
         """抓尾巴 -> 恶作剧：坏笑吐舌 + 蓄力收缩再猛弹开 + 橘子汁朝鼠标喷。
         最高优先级状态，持续 1.5 秒后自然回落 idle。
-        （2026-10-22 起鼠标点击不再触发，见 _tail_poke；机制保留备用。）"""
+        （2026-10-22 用户最终裁决：尾巴点击保持恶作剧连招——中途试过的
+        温和版 _tail_poke 已删除。）"""
         self._touch()
         self.mischief_until = self.t + 1.5
         self._fled = False                   # 还没溜
@@ -2747,7 +2736,7 @@ class EjeePet(EjeePaintMixin, QWidget):
                 if self._bread is None and time.time() >= self._dbl_until:
                     zone = self._click_zone(e)
                     if zone == "tail":
-                        self._tail_poke()
+                        self._mischief()
                     elif zone == "head":
                         self._pat()
                     else:

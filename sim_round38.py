@@ -1368,19 +1368,22 @@ def main():
     run(p30, 0.1)
     check("番茄：同段不重复说", p30.bubble_text == "")
 
-    # ---- 13l. 用户裁决三连：尾巴温和 / 不出屏 / 移除项复查 ----
+    # ---- 13l. 用户裁决三连：尾巴恶作剧恢复 / 不出屏 / 移除项复查 ----
     print("  [13l] 裁决项")
-    # 尾巴：点击只温和甩尾说话，不触发恶作剧连招（不弹开/不喷汁/不溜走）
+    # 尾巴：点击保持原恶作剧连招（坏笑吐舌 + 弹开 + 喷汁，2026-10-22 终裁）
     p31 = make_pet(app)
     p31.t = 5.0
     p31._last_t = 5.0
-    p31._tail_poke()
-    check("尾巴：温和反应有台词", len(p31.bubble_text) > 0)
-    check("尾巴：不触发恶作剧（mischief_until 不动）",
-          p31.mischief_until <= p31.t)
-    check("尾巴：不触发逃跑（_flee 仍空）", p31._flee is None)
-    check("尾巴：不喷汁（无果汁粒子）",
-          not any(getattr(x, "kind", "") == "juice" for x in p31.particles))
+    p31._mischief()
+    check("尾巴：恶作剧状态激活（mischief_until=1.5s）",
+          abs(p31.mischief_until - (p31.t + 1.5)) < 1e-6,
+          "until=%.2f" % p31.mischief_until)
+    check("尾巴：恶作剧有台词", len(p31.bubble_text) > 0)
+    check("尾巴：尾巴甩动初值已设（mis_tail.v=1.0）",
+          p31._mis_tail.v == 1.0, "v=%.2f" % p31._mis_tail.v)
+    check("尾巴：蓄力弹开排程就位", p31._mis_puff == p31.t + 0.12)
+    n_juice = sum(1 for x in p31.particles if getattr(x, "kind", "") == "juice")
+    check("尾巴：橘子汁全向溅射（>=20 颗）", n_juice >= 20, "n=%d" % n_juice)
     # 不出屏：默认落位与缩放落位后整个窗口都在屏幕可用区内
     p32 = make_pet(app)
     ag = app.primaryScreen().availableGeometry()

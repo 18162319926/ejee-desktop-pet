@@ -179,6 +179,7 @@ def make_pet(app, w=400, h=340, x=200, y=300):
     pet._meta.setdefault("ach", {})
     pet._meta.setdefault("pomo_total", 0)
     pet._meta.setdefault("birthday", "")
+    pet._meta.setdefault("owner_birthday", "")
     pet._pass = False
     pet._tray = None
     pet.timer = None
@@ -1098,36 +1099,30 @@ def main():
     print("\n[13] D 批次（设计与功能）")
     import time as _time
 
-    # ---- 13a. D1-1 打字机气泡 ----
-    print("  [13a] 打字机气泡")
+    # ---- 13a. 打字机已移除（2026-10-22 用户裁决）：台词整句弹出 ----
+    print("  [13a] 气泡整句显示")
     p13 = make_pet(app)
     p13.t = 5.0
     p13._last_t = 5.0
-    long_txt = "这是一条比较长的台词，用来验证打字机逐字显示的效果呀。"
+    long_txt = "这是一条比较长的台词，用来验证整句弹出的效果呀。"
     p13._say(long_txt, 9.0)
     p13.bubble_t0 = p13.t
-    check("打字机：出生瞬间不显示（停顿期）",
-          p13._bubble_shown_text() == "")
+    check("气泡：出生瞬间即全量（无打字机停顿）",
+          p13._bubble_shown_text() == long_txt)
     p13.bubble_t0 = p13.t - 0.5
-    part = p13._bubble_shown_text()
-    check("打字机：0.5s 只显示前缀",
-          0 < len(part) < len(long_txt), "n=%d" % len(part))
-    p13.bubble_t0 = p13.t - 9.0
-    check("打字机：时间到显示全量",
+    check("气泡：0.5s 仍是全量（无逐字过程）",
           p13._bubble_shown_text() == long_txt)
     short = "咕噜咕噜～"
     p13._say(short, 2.0)
-    check("打字机：短句整句弹出（不吃打字机）",
+    check("气泡：短句同样整句弹出",
           p13._bubble_shown_text() == short)
-    # 渲染级：部分文本的墨量少于全量
-    # 文字画在不透明气泡底上，alpha 通道不变；判据用「中间调文字像素」：
-    # 气泡底近白(255,24x,23x)，文字暖棕(163,141,123)，气泡描边两侧相同可抵消
+    # 渲染级：整句弹出后文字一次画齐（全量文本画在气泡里）
     p13._say(long_txt, 9.0)
     p13.bubble_t0 = p13.t - 0.5
-    img_part = _render_layer(p13, p13._draw_bubble).convertToFormat(
+    img_a = _render_layer(p13, p13._draw_bubble).convertToFormat(
         QImage.Format_RGBA8888)
     p13.bubble_t0 = p13.t - 9.0
-    img_full = _render_layer(p13, p13._draw_bubble).convertToFormat(
+    img_b = _render_layer(p13, p13._draw_bubble).convertToFormat(
         QImage.Format_RGBA8888)
 
     def _ink(img):   # 中间调像素（文字+描边 AA；P0-3：先转 RGBA8888 再读通道）
@@ -1137,9 +1132,9 @@ def main():
                            img.pixelColor(x, y).green(),
                            img.pixelColor(x, y).blue()) < 220)
 
-    check("打字机：部分文本渲染墨量少于全量",
-          _ink(img_full) > _ink(img_part) + 500,
-          "part=%d full=%d" % (_ink(img_part), _ink(img_full)))
+    check("气泡：全量渲染与年龄无关（无逐字差异）",
+          _ink(img_a) == _ink(img_b) and _ink(img_a) > 800,
+          "a=%d b=%d" % (_ink(img_a), _ink(img_b)))
 
     # ---- 13b. D1-2 睡前哈欠铺垫 ----
     print("  [13b] 睡前哈欠")
@@ -1220,25 +1215,40 @@ def main():
     run(p19, 0.1)
     check("被盯久了：没有悬停计时就不开口", len(p19.bubble_text) == 0)
 
-    # ---- 13e. D1-5/6 使用说明与首次引导 ----
-    print("  [13e] 使用说明与引导")
+    # ---- 13e. 数据目录/使用说明已移除（2026-10-22 用户裁决）+ 主人生日 ----
+    print("  [13e] 移除项与主人生日")
     p20 = make_pet(app)
     p20.t = 1.0
     p20._last_t = 1.0
-    p20._show_tips()
-    check("使用说明：第一条已说、已记档",
-          p20.bubble_text == E.DEFAULT_LINES["tips"][0]
-          and p20._meta["tips_seen"] is True)
-    check("数据目录：方法就位", callable(getattr(p20, "_open_data_dir", None)))
-    p21 = make_pet(app)
-    p21.t = 1.0
-    p21._last_t = 1.0
-    p21._meta["greet_day"] = ""
-    p21._meta["first_seen"] = _time.strftime("%Y-%m-%d")
-    p21._maybe_greet()
-    check("首次引导：相识第 1 天问候已说", len(p21.bubble_text) > 0)
-    check("首次引导：greet_day 记档",
-          p21._meta["greet_day"] == _time.strftime("%Y-%m-%d"))
+    check("移除：无使用说明入口",
+          not callable(getattr(p20, "_show_tips", None)))
+    check("移除：无打开数据目录入口",
+          not callable(getattr(p20, "_open_data_dir", None)))
+    check("移除：tips_seen 不再记档",
+          "tips_seen" not in p20._meta)
+    check("生日：两类入口就位",
+          callable(getattr(p20, "_set_birthday", None))
+          and len(E.DEFAULT_LINES.get("owner_birthday", [])) > 0
+          and len(E.DEFAULT_LINES.get("birthday", [])) > 0)
+    p20b = make_pet(app)
+    p20b.t = 1.0
+    p20b._last_t = 1.0
+    p20b._meta["greet_day"] = ""
+    p20b._meta["owner_birthday"] = _time.strftime("%m-%d")
+    p20b._maybe_greet()
+    check("主人生日：当天问候换成祝贺台词",
+          p20b.bubble_text in E.DEFAULT_LINES["owner_birthday"])
+    check("主人生日：庆祝已触发", p20b._celebrate_until > p20b.t)
+    # 两类生日同天时主人生日优先（EJEE 的让位）
+    p20c = make_pet(app)
+    p20c.t = 1.0
+    p20c._last_t = 1.0
+    p20c._meta["greet_day"] = ""
+    p20c._meta["birthday"] = _time.strftime("%m-%d")
+    p20c._meta["owner_birthday"] = _time.strftime("%m-%d")
+    p20c._maybe_greet()
+    check("双生日同日：主人优先",
+          p20c.bubble_text in E.DEFAULT_LINES["owner_birthday"])
 
     # ---- 13f. D2-7 夜间降亮 ----
     print("  [13f] 夜间降亮")
@@ -1357,6 +1367,49 @@ def main():
     p30.bubble_text = ""
     run(p30, 0.1)
     check("番茄：同段不重复说", p30.bubble_text == "")
+
+    # ---- 13l. 用户裁决三连：尾巴温和 / 不出屏 / 移除项复查 ----
+    print("  [13l] 裁决项")
+    # 尾巴：点击只温和甩尾说话，不触发恶作剧连招（不弹开/不喷汁/不溜走）
+    p31 = make_pet(app)
+    p31.t = 5.0
+    p31._last_t = 5.0
+    p31._tail_poke()
+    check("尾巴：温和反应有台词", len(p31.bubble_text) > 0)
+    check("尾巴：不触发恶作剧（mischief_until 不动）",
+          p31.mischief_until <= p31.t)
+    check("尾巴：不触发逃跑（_flee 仍空）", p31._flee is None)
+    check("尾巴：不喷汁（无果汁粒子）",
+          not any(getattr(x, "kind", "") == "juice" for x in p31.particles))
+    # 不出屏：默认落位与缩放落位后整个窗口都在屏幕可用区内
+    p32 = make_pet(app)
+    ag = app.primaryScreen().availableGeometry()
+    p32._default_pos()
+    g0 = p32.geometry()
+    check("不出屏：默认落位完整在屏内",
+          g0.left() >= ag.left() and g0.right() <= ag.right()
+          and g0.top() >= ag.top() and g0.bottom() <= ag.bottom(),
+          "geo=%s ag=%s" % (g0, ag))
+    p32._restore_pos = (-5000, -5000)      # 历史位置在屏幕外（拔副屏场景）
+    p32._restore_position()
+    g1 = p32.geometry()
+    check("不出屏：越界历史位置被拉回屏内",
+          g1.left() >= ag.left() and g1.right() <= ag.right()
+          and g1.top() >= ag.top() and g1.bottom() <= ag.bottom(),
+          "geo=%s" % (g1,))
+    # 滑行撞墙：反弹后位置硬 clamp 回屏内（不留嵌墙外的帧）
+    p33 = make_pet(app)
+    p33.t = 5.0
+    p33._last_t = 5.0
+    p33.clock.ms = 5000
+    p33.move(int(ag.right() - p33.width() + 60), int(ag.top() + 40))
+    p33._glide = [600.0, 0.0]              # 猛烈向右撞墙
+    run(p33, 0.5)
+    g2 = p33.geometry()
+    check("不出屏：滑行撞墙后仍在屏内",
+          g2.right() <= ag.right() and g2.left() >= ag.left()
+          and g2.bottom() <= ag.bottom() and g2.top() >= ag.top(),
+          "geo=%s" % (g2,))
 
     print("\n" + "=" * 52)
     if FAILED:

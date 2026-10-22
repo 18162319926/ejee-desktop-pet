@@ -1562,24 +1562,11 @@ class EjeePaintMixin:
                                     cy + math.sin(ang) * r * 1.02), rr, rr)
         return path
 
-    # ---- 打字机气泡参数：14 字/秒，前 0.12s 停顿；≤6 字短句整句弹出 ----
-    TYPE_CPS = 14.0
-    TYPE_DELAY = 0.12
-    TYPE_MIN = 6
+    # ---- 打字机效果：2026-10-22 用户裁决移除（台词整句弹出）----
 
     def _bubble_shown_text(self):
-        """打字机当前应显示的文本前缀：台词逐字冒出，像"在说话"而不是
-        "贴出一张纸"。预览模式返回全量（回归需与显示时机无关的确定性），
-        短句不吃打字机（"咕噜咕噜～"这类一口气说完更自然）。"""
-        txt = self.bubble_text
-        if not txt or len(txt) <= self.TYPE_MIN:
-            return txt
-        if getattr(sys.modules[type(self).__module__], "PREVIEW_MODE", False):
-            return txt
-        n = int((self.t - self.bubble_t0 - self.TYPE_DELAY) * self.TYPE_CPS)
-        if n >= len(txt):
-            return txt
-        return txt[:max(0, n)]
+        """兼容保留的入口：打字机已移除，恒返回全量文本。"""
+        return self.bubble_text
 
     def _draw_bubble(self, p):
         """对话气泡：框型 + 皮肤随情绪切换（主题表见 BUBBLE_THEMES）。
@@ -1756,36 +1743,12 @@ class EjeePaintMixin:
         p.setFont(f)
         p.setPen(QPen(INK))
         area = QRectF(bx + 15, y_b - h, w - 30, h - 26.0 if badges else h)
-        shown = self._bubble_shown_text()
+        # 打字机已移除：全量文本中排直画（有徽章行同理，徽章占底部行）
+        p.drawText(area, Qt.AlignHCenter | Qt.AlignVCenter
+                   | Qt.TextWordWrap, self.bubble_text)
         if badges:
-            # 有徽章行：文字占上部，徽章画在底部那一条里
-            if shown == self.bubble_text:
-                p.drawText(area, Qt.AlignHCenter | Qt.AlignVCenter
-                           | Qt.TextWordWrap, self.bubble_text)
-            else:
-                self._draw_typing(p, fm, area, shown)
             self._draw_stat_badges(p, bx, y_b, w, badges)
-        elif shown == self.bubble_text:
-            p.drawText(area, Qt.AlignHCenter | Qt.AlignVCenter
-                       | Qt.TextWordWrap, self.bubble_text)
-        else:
-            self._draw_typing(p, fm, area, shown)
         p.restore()
-
-    def _draw_typing(self, p, fm, area, shown):
-        """打字机进行中的文字版面：按全量文本的中排位置定位（同宽下
-        前缀换行稳定），逐字向下补；说完一帧自动接回全量中排版式，
-        中间无跳变。前 0.12s 停顿期 shown 为空串，自然留白。"""
-        full_r = fm.boundingRect(0, 0, int(area.width()), 500,
-                                 Qt.TextWordWrap, self.bubble_text)
-        if not shown:
-            return
-        part_r = fm.boundingRect(0, 0, int(area.width()), 500,
-                                 Qt.TextWordWrap, shown)
-        top = area.top() + (area.height() - full_r.height()) / 2.0
-        p.drawText(QRectF(area.left(), top, area.width(),
-                          part_r.height() + 4.0),
-                   Qt.AlignHCenter | Qt.AlignTop | Qt.TextWordWrap, shown)
 
     def _draw_stat_badges(self, p, bx, y_b, w, badges):
         """陪伴档案徽章行：星星=陪伴天数 · 面包=喂食次数 · 爱心=摸头次数。

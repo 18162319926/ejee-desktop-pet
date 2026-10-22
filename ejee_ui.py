@@ -822,16 +822,21 @@ class Crumb(QWidget):
 class BirthdayDialog(QDialog):
     """生日设置小对话框：月 / 日两个下拉（与 PomoDialog 同一套奶油卡片
     皮肤）。value 属性返回 "MM-DD"；选「不设」= 空串（清除生日）。
-    不猜生日：用户不设置就不庆祝。"""
+    不猜生日：用户不设置就不庆祝。
+    kind="ejee"  设置 EJEE 自己的生日（当天它过生日）
+    kind="owner" 设置主人的生日（当天它给主人庆祝）"""
 
-    def __init__(self, current="", parent=None):
+    def __init__(self, current="", parent=None, kind="ejee"):
         super().__init__(parent)
-        self.setWindowTitle("EJEE 的生日")
+        self.setWindowTitle("EJEE 的生日" if kind == "ejee" else "主人的生日")
         self.setModal(True)
         self.value = None
         self.setStyleSheet(DIALOG_QSS)
         lay = QVBoxLayout(self)
-        tip = QLabel("给 EJEE 定个生日吧～\n（选「不设」就不过生日）")
+        if kind == "ejee":
+            tip = QLabel("给 EJEE 定个生日吧～\n（选「不设」就不过生日）")
+        else:
+            tip = QLabel("告诉我你的生日吧～\n（选「不设」就不提醒你）")
         lay.addWidget(tip)
         row = QHBoxLayout()
         self._m = QComboBox()

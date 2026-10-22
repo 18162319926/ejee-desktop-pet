@@ -299,6 +299,9 @@ DEFAULT_LINES = {
     "zoom": ["变大啦！", "这个尺寸刚刚好！"],
     "double_click": ["砰！回到原样啦！", "还是这个大小最舒服。"],
     "mischief": ["嘿嘿，中计了吧！", "尝尝我的橘子汁攻击！"],
+    # 点尾巴（温和反应，不弹开不躲避）
+    "tail_poke": ["尾巴痒痒的，不要戳嘛……", "尾巴抖了一下！吧嗒～",
+                  "再戳……也不会喷橘子汁的哦。"],
     "stuffed": ["吃不下了……嗝。", "肚子圆圆的，让我歇一会儿嘛。",
                 "再吃就要变成橘子了……"],
     "stuffing": ["嗝——！吃撑了，先不吃了……", "唔，好饱，肚子鼓起来了。"],
@@ -338,7 +341,12 @@ DEFAULT_LINES = {
     # 生日（当天问候替换）
     "birthday": ["今天是我的生日！！谢谢你还记得！",
                  "生日快乐给我自己！吧嗒吧嗒～"],
-    # 使用说明 / 相识前 3 天的新手提示（第 1 条喂食 / 第 2 条摸头 / 第 3 条菜单）
+    # 主人生日（当天 EJEE 给主人庆祝）
+    "owner_birthday": ["今天是你的生日！！生日快乐——！",
+                       "生日快乐！今天最大的是你，吧嗒～",
+                       "主人生日快乐！愿望会实现的哦！"],
+    # 相识前 3 天的新手提示（第 1 条喂食 / 第 2 条摸头 / 第 3 条菜单）
+    # —— 2026-10-22 用户裁决：去掉使用说明功能，此池仅作台词外置覆盖兼容保留
     "tips": ["吧嗒～双击我可以喂面包哦，我超喜欢的。",
              "摸摸我的头试试？小心摸太多我会跑掉哦。",
              "右键我有好多菜单：番茄钟、穿透模式……慢慢研究！"],
@@ -634,6 +642,8 @@ class EjeePet(EjeePaintMixin, QWidget):
         self._meta["pomo_total"] = _to_int(data.get("pomo_total"), 0)
         bd = str(data.get("birthday") or "")
         self._meta["birthday"] = bd if len(bd) == 5 else ""
+        ob = str(data.get("owner_birthday") or "")
+        self._meta["owner_birthday"] = ob if len(ob) == 5 else ""
         try:
             self._restore_pos = (int(data["x"]), int(data["y"]))
         except (KeyError, TypeError, ValueError):
@@ -874,7 +884,7 @@ class EjeePet(EjeePaintMixin, QWidget):
 
     def _maybe_greet(self):
         """每天首次见面打一声招呼；隔了很久才回来有专属问候；
-        生日/节日当天换彩蛋问候；相识前 3 天追加一条新手提示；
+        特殊日子（EJEE 生日 / 主人生日 / 节日）换彩蛋问候；
         天数类成就也在跨天时刻结算。"""
         today = time.strftime("%Y-%m-%d")
         if self._meta.get("greet_day") == today:
@@ -886,8 +896,17 @@ class EjeePet(EjeePaintMixin, QWidget):
         if gap > 10 * 3600 and self._meta.get("last_seen", 0) > 0:
             text = "你终于回来了！" + text
         md = time.strftime("%m-%d")
-        if self._meta.get("birthday") == md:
-            # 生日：彩纸 + 专属问候（庆祝跳用 celebrate 通道）
+        if self._meta.get("owner_birthday") == md:
+            # 主人生日：彩纸 + 专属祝贺（庆祝跳用 celebrate 通道）
+            text = self._line("owner_birthday")
+            self._celebrate_until = self.t + 2.0
+            self._sq.kick(3.0)
+            for i in range(16):
+                self.particles.append(Particle(
+                    "confetti", self.BCX + random.uniform(-60, 60),
+                    self.head_top + random.uniform(-4, 20), self.t))
+        elif self._meta.get("birthday") == md:
+            # EJEE 生日：彩纸 + 专属问候（庆祝跳用 celebrate 通道）
             text = self._line("birthday")
             self._celebrate_until = self.t + 2.0
             self._sq.kick(3.0)
@@ -899,20 +918,6 @@ class EjeePet(EjeePaintMixin, QWidget):
             text = FESTIVALS[md]
         self._say(text, 3.6)
         self._check_ach()               # day7/30/100/365 跨天在这里结算
-        # 相识前 3 天：各一条轻提示（singleShot 在问候气泡说完后弹）
-        day_n = self._day_index()
-        tips = self._lines.get("tips") or DEFAULT_LINES["tips"]
-        if 1 <= day_n <= 3 and day_n - 1 < len(tips):
-            tip = tips[day_n - 1]
-            QTimer.singleShot(4300, lambda: self._say(tip, 3.4))
-
-    def _day_index(self):
-        """相识第几天（相识日 = 第 1 天）。first_seen 非法时返回大数。"""
-        try:
-            d0 = time.strptime(self._meta.get("first_seen", ""), "%Y-%m-%d")
-        except ValueError:
-            return 999
-        return int((time.time() - time.mktime(d0)) / 86400.0) + 1
 
     def _check_ach(self, announce=True):
         """成就结算：达成的里程碑记入 _meta["ach"]（每项只庆祝一次）。
@@ -1086,9 +1091,19 @@ class EjeePet(EjeePaintMixin, QWidget):
         self._sq.kick(-1.4)                      # 起跑先蹲一下
         self._say(self._line("runaway"), 2.0)
 
+    def _tail_poke(self):
+        """点尾巴：温和反应——尾巴轻轻一甩 + 一句话，不弹开、不喷汁、
+        不溜走。2026-10-22 用户裁决：靠近尾巴不要躲避。
+        （原 _mischief 恶作剧连招保留为死代码，日后想恢复改一行即可。）"""
+        self._touch()
+        self._mis_tail.snap(0.8)      # 尾巴甩一下（弹簧自然衰减）
+        self._sq.kick(0.5)
+        self._say(self._line("tail_poke"), 2.6)
+
     def _mischief(self):
         """抓尾巴 -> 恶作剧：坏笑吐舌 + 蓄力收缩再猛弹开 + 橘子汁朝鼠标喷。
-        最高优先级状态，持续 1.5 秒后自然回落 idle。"""
+        最高优先级状态，持续 1.5 秒后自然回落 idle。
+        （2026-10-22 起鼠标点击不再触发，见 _tail_poke；机制保留备用。）"""
         self._touch()
         self.mischief_until = self.t + 1.5
         self._fled = False                   # 还没溜
@@ -1864,6 +1879,10 @@ class EjeePet(EjeePaintMixin, QWidget):
             if hit:
                 self._sq.kick(2.6)
                 self.angry_until = self.t + 2.0
+                # 反弹只翻速度不回位置：硬 clamp 一次，绝不留嵌在墙外的帧
+                # （2026-10-22 用户裁决：窗口不许走到屏幕外面去）
+                bx_, by_ = self._band_clamp(float(self.x()), float(self.y()))
+                self.move(int(bx_), int(by_))
                 # 撞墙吐槽（节流 + 免打扰门控）：松手惯性太猛时的一句
                 if (self.t >= self._next_bump_line
                         and not self._meta.get("silent")
@@ -2450,7 +2469,9 @@ class EjeePet(EjeePaintMixin, QWidget):
     def _restore_position(self):
         """启动落位：优先回到上次离开的位置（窗口中心仍在某块屏幕的
         可用区内，多屏/拔掉副屏都不会把宠物放到看不见的地方），
-        否则回主屏右下角默认位。"""
+        否则回主屏右下角默认位。
+        2026-10-22 用户裁决：整个窗口必须留在屏幕内，不再允许底部
+        睡眠泡泡透明区溢出屏幕下缘。"""
         r = getattr(self, "_restore_pos", None)
         if r is not None:
             c = QPoint(r[0] + self.width() // 2, r[1] + self.height() // 2)
@@ -2459,10 +2480,8 @@ class EjeePet(EjeePaintMixin, QWidget):
                 ag = scr.availableGeometry()
                 nx = clamp(r[0], ag.left(),
                            max(ag.left(), ag.right() - self.width()))
-                # 底部透明区允许溢出屏幕：宠物脚底仍能贴住任务栏
                 ny = clamp(r[1], ag.top(),
-                           max(ag.top(), ag.bottom() - self.height()
-                               + self._win_pad_b()))
+                           max(ag.top(), ag.bottom() - self.height()))
                 self.move(int(nx), int(ny))
                 return
         self._default_pos()
@@ -2470,14 +2489,15 @@ class EjeePet(EjeePaintMixin, QWidget):
     def _win_pad_b(self):
         """画布下方那块只给睡眠正圆泡泡的透明区（px）。落位/回位/缩放时
         不该把它算进"可见高度"，否则宠物会被顶起来悬空。顶部那块
-        (PAD_T) 不用减——角色本来就在 PAD_T 下面，可见高度从窗口顶算起。"""
+        (PAD_T) 不用减——角色本来就在 PAD_T 下面，可见高度从窗口顶算起。
+        （2026-10-22 起落位不再溢出屏幕底部，此值仅供绘制参考。）"""
         return int(round((DH - PAD_T - DH_CHAR) * self.size))
 
     def _default_pos(self):
         scr = QApplication.primaryScreen()
         ag = scr.availableGeometry() if scr else QRectF(0, 0, 1920, 1080)
         self.move(int(ag.right() - self.width() - 40),
-                  int(ag.bottom() - self.height() + self._win_pad_b() - 60))
+                  int(ag.bottom() - self.height() - 60))
 
     # ---------- 开机自动启动（HKCU\...\Run，仅 Windows）----------
     @staticmethod
@@ -2550,11 +2570,11 @@ class EjeePet(EjeePaintMixin, QWidget):
         ny = round(anchor.y() - ay * new_s)
         self.resize(int(round(DW * new)), int(round(DH * new)))
         # 屏幕钳制：缩放后窗口完整留在可用区内（小屏放不下时退到贴顶）
+        # （2026-10-22 用户裁决：整个窗口不出屏，底部透明区也不例外）
         scr = self._scr_rect()
         nx = clamp(nx, scr.left(), max(scr.left(), scr.right() - self.width()))
-        pad_b = (DH - DH_CHAR) * new    # 底部透明区不计入可见高度
         ny = clamp(ny, scr.top(),
-                   max(scr.top(), scr.bottom() - self.height() + pad_b))
+                   max(scr.top(), scr.bottom() - self.height()))
         if (nx, ny) != (self.x(), self.y()):
             self.move(nx, ny)
         self.size = new
@@ -2727,7 +2747,7 @@ class EjeePet(EjeePaintMixin, QWidget):
                 if self._bread is None and time.time() >= self._dbl_until:
                     zone = self._click_zone(e)
                     if zone == "tail":
-                        self._mischief()
+                        self._tail_poke()
                     elif zone == "head":
                         self._pat()
                     else:
@@ -2811,6 +2831,9 @@ class EjeePet(EjeePaintMixin, QWidget):
         bd = str(d.get("birthday") or "")
         if len(bd) == 5:
             self._meta["birthday"] = bd
+        ob = str(d.get("owner_birthday") or "")
+        if len(ob) == 5:
+            self._meta["owner_birthday"] = ob
         self._save()
         self._say("欢迎回来，这些日子我都记起来啦！", 3.2)
 
@@ -2833,43 +2856,18 @@ class EjeePet(EjeePaintMixin, QWidget):
         self._meta["ach"] = {}
         self._meta["pomo_total"] = 0
         self._meta["birthday"] = ""
+        self._meta["owner_birthday"] = ""
+        self._meta.pop("tips_seen", None)
         self._save()
         self._say("记忆清空啦……我们、重新认识一下吧？", 3.6)
 
-    def _open_data_dir(self):
-        """打开数据目录：ejee_save.json / lines.json 都在这里——
-        台词自定义能力（外置 lines.json 覆盖内置台词）从此可被发现。"""
+    def _set_birthday(self, kind="ejee"):
+        """设置生日（月-日）：kind="ejee" 是 EJEE 自己的生日（当天它过生日），
+        kind="owner" 是主人的生日（当天它给主人庆祝）。选"不设"即清除。
+        不猜生日、不设就不庆祝。"""
         self._touch()
-        try:
-            if sys.platform == "win32":
-                os.startfile(APP_DIR)       # noqa: S606
-            else:
-                import subprocess
-                subprocess.Popen(["xdg-open", APP_DIR])
-        except OSError:
-            pass
-
-    def _show_tips(self):
-        """使用说明：气泡连播三条操作提示（喂食 / 摸头 / 菜单）。
-        看过一次就记档（首次引导只认相识天数，不再重复）。"""
-        self._touch()
-        tips = list(self._lines.get("tips") or DEFAULT_LINES["tips"])
-        self._meta["tips_seen"] = True
-        self._save()
-
-        def _next(i=0):
-            if i >= len(tips):
-                return
-            self._say(tips[i], 3.4)
-            QTimer.singleShot(3800, lambda: _next(i + 1))
-
-        _next()
-
-    def _set_birthday(self):
-        """设置 EJEE 的生日（月-日）：当天首次问候换生日彩蛋 + 彩纸；
-        选"不设"即清除。不猜生日、不设就不庆祝。"""
-        self._touch()
-        dlg = BirthdayDialog(self._meta.get("birthday", ""))
+        key = "birthday" if kind == "ejee" else "owner_birthday"
+        dlg = BirthdayDialog(self._meta.get(key, ""), self, kind)
         dlg.adjustSize()
         scr = self._scr_rect()
         x = int(clamp(self.x() + (self.width() - dlg.width()) // 2,
@@ -2878,10 +2876,13 @@ class EjeePet(EjeePaintMixin, QWidget):
                       scr.bottom() - dlg.height() - 8))
         dlg.move(x, y)
         if dlg.exec() == QDialog.Accepted:
-            self._meta["birthday"] = dlg.value or ""
+            self._meta[key] = dlg.value or ""
             self._save()
             if dlg.value:
-                self._say("记住了！到时候要给我庆祝哦。", 3.0)
+                if kind == "ejee":
+                    self._say("记住了！到时候要给我庆祝哦。", 3.0)
+                else:
+                    self._say("记住了！你的生日我一定陪你过。", 3.0)
             else:
                 self._say("好吧……那就不庆祝了。", 2.6)
 
@@ -2893,12 +2894,10 @@ class EjeePet(EjeePaintMixin, QWidget):
         act_take.triggered.connect(self._take_bread)
         menu.addAction(_menu_icon("heart"), "陪伴档案").triggered.connect(
             self._show_stats)
-        menu.addAction(_menu_icon("star"), "设置生日…").triggered.connect(
-            self._set_birthday)
-        menu.addAction(_menu_icon("eye"), "使用说明").triggered.connect(
-            self._show_tips)
-        menu.addAction(_menu_icon("reset"), "打开数据目录…").triggered.connect(
-            self._open_data_dir)
+        menu.addAction(_menu_icon("star"), "设置 EJEE 的生日…").triggered.connect(
+            lambda: self._set_birthday("ejee"))
+        menu.addAction(_menu_icon("star"), "设置我的生日…").triggered.connect(
+            lambda: self._set_birthday("owner"))
         act_pomo = menu.addAction(_menu_icon("clock"), self._pomo_label())
         act_pomo.triggered.connect(self._pomo_toggle)
         menu.addSeparator()
@@ -3068,10 +3067,10 @@ class EjeePet(EjeePaintMixin, QWidget):
             self._take_bread)
         menu.addAction(_menu_icon("heart"), "陪伴档案").triggered.connect(
             self._show_stats)
-        menu.addAction(_menu_icon("star"), "设置生日…").triggered.connect(
-            self._set_birthday)
-        menu.addAction(_menu_icon("eye"), "打开数据目录…").triggered.connect(
-            self._open_data_dir)
+        menu.addAction(_menu_icon("star"), "设置 EJEE 的生日…").triggered.connect(
+            lambda: self._set_birthday("ejee"))
+        menu.addAction(_menu_icon("star"), "设置我的生日…").triggered.connect(
+            lambda: self._set_birthday("owner"))
         self.tray_act_pomo = menu.addAction(_menu_icon("clock"),
                                             "开始番茄钟…")
         self.tray_act_pomo.triggered.connect(self._pomo_toggle)

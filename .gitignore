@@ -21,6 +21,8 @@ tools/*
 !tools/make_leaf_assets.py
 # 例外：预览回归工具是每轮验证流程核心（--shot 比对/刷新基线），必须入库
 !tools/check_preview.py
+# 例外：Git Data API 备用推送通道（代理拦 443 时兜底），必须入库
+!tools/push_via_api.py
 # 各状态预览图（--shot 生成）与回归基准，仅本地参考
 previews/
 _baseline/

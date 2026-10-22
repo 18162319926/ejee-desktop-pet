@@ -8,6 +8,7 @@
 行为与主文件版逐字一致；验收基准：--shot 14 张预览逐字节一致。
 """
 import math
+import random
 import sys
 import time
 
@@ -15,13 +16,17 @@ from PySide6.QtCore import Qt, QTimer, QPointF, QRectF, QPoint, Signal
 from PySide6.QtGui import (QPainter, QColor, QPen, QBrush, QPainterPath,
                            QIcon, QPixmap, QLinearGradient)
 from PySide6.QtWidgets import (QApplication, QWidget, QMenu, QDialog,
-                               QLabel, QPushButton, QVBoxLayout, QHBoxLayout)
+                               QLabel, QPushButton, QVBoxLayout, QHBoxLayout,
+                               QComboBox)
 
 from ejee_paint import clamp, DW, PAD_T
 
 # ---- 番茄钟时长配置（与 PomoDialog 同住；ejee_pet 回导引用） ----
 POMO_PRESETS = [15, 25, 45, 60, 90]   # 番茄钟时长预设（分钟）
 POMO_MIN_DEF, POMO_MIN_LO, POMO_MIN_HI = 25, 1, 180
+
+# 氛围飘浮物生成间隔（秒）：小叶子/星点偶尔横穿屏幕的桌面氛围
+AMBIENT_EVERY = (55.0, 95.0)
 
 
 _ICON_CACHE = {}
@@ -575,6 +580,12 @@ class JuiceOverlay(QWidget):
         self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         self.setAttribute(Qt.WA_ShowWithoutActivating, True)
         self._items = []
+        # 氛围飘浮物（D2-11）：与汁滴共用这块全局透明窗，低透明度横穿屏幕。
+        # _amb_next 惰性初始化——JuiceOverlay 在 EjeePet.__init__ 里创建，
+        # 而且位置在呼吸/尾摆相位之前：构造期咬 random 会挪动 --shot 的
+        # 种子流，让全部预览帧整体亚像素位移（P0-2 血泪教训的变体）
+        self._amb = []
+        self._amb_next = None
         self.hide()
         self._place()
 
@@ -591,8 +602,52 @@ class JuiceOverlay(QWidget):
         self.setGeometry(int(r.left()), int(r.top()),
                          int(r.width()), int(r.height()))
 
+    def ambient_step(self, dt, scr, t_now=None):
+        """氛围飘浮物推进（宠物主循环每帧调用）：小叶子/星点从屏幕一侧
+        缓慢飘到另一侧，低透明度，与角色无关的桌面氛围。
+        不进粒子列表、不进视线系统、不与角色产生任何交互；
+        scr 用宠物当前所在屏幕（多屏各飘各的）。"""
+        if scr is None or dt <= 0:
+            return
+        now = t_now if t_now is not None else time.time()
+        if self._amb_next is None:      # 首帧才定首片飘叶的时刻（不动构造期种子流）
+            self._amb_next = now + random.uniform(18.0, 40.0)
+        L, R, T = scr.left(), scr.right(), scr.top()
+        H = scr.height()
+        if now >= self._amb_next:
+            self._amb_next = now + random.uniform(*AMBIENT_EVERY)
+            from_left = random.random() < 0.5
+            spd = random.uniform(20.0, 34.0)
+            self._amb.append({
+                "x": float(L - 30 if from_left else R + 30),
+                "y": T + H * random.uniform(0.08, 0.62),
+                "vx": spd if from_left else -spd,
+                "ph": random.uniform(0.0, 6.28),
+                "rot": random.uniform(0.0, 360.0),
+                "vr": random.uniform(-40.0, 40.0),
+                "kind": "leaf" if random.random() < 0.6 else "spark",
+                "t0": now,
+                "exit": float(R + 40 if from_left else L - 40),
+            })
+        alive = []
+        for it in self._amb:
+            it["x"] += it["vx"] * dt
+            it["rot"] += it["vr"] * dt
+            it["_y"] = it["y"] + math.sin(now * 1.3 + it["ph"]) * 9.0
+            # 淡入 2.5s；飘近出口 2.5s 路程内淡出（按当前速度折算路程）
+            it["_a"] = clamp(min((now - it["t0"]) / 2.5,
+                                 abs(it["exit"] - it["x"])
+                                 / max(60.0, abs(it["vx"]) * 2.5)), 0.0, 1.0)
+            if (it["vx"] > 0 and it["x"] < it["exit"]) or \
+                    (it["vx"] < 0 and it["x"] > it["exit"]):
+                alive.append(it)
+        self._amb = alive
+        if self._amb and self.isVisible():
+            self.update()
+
     def refresh(self, pet):
-        """每帧把宠物身上的汁滴换算成全局坐标；没有汁滴就自动隐藏。"""
+        """每帧把宠物身上的汁滴换算成全局坐标；没有汁滴也没有氛围
+        飘浮物时自动隐藏。"""
         s = pet.width() / DW
         items = []
         for pt in pet.particles:
@@ -606,7 +661,7 @@ class JuiceOverlay(QWidget):
                                        int((pt.y + PAD_T) * s)))
             items.append((g.x(), g.y(), pt.size * s, a, age, pt.color))
         self._items = items
-        if items:
+        if items or self._amb:
             if not self.isVisible():
                 self._place()
                 self.show()
@@ -614,12 +669,43 @@ class JuiceOverlay(QWidget):
         elif self.isVisible():
             self.hide()
 
+    def _draw_ambient(self, p, ox, oy):
+        """氛围飘浮物：秋橙小叶子（呼应角色的橘子叶）与淡金四角星点，
+        旋转着慢飘，透明度封顶 0.26 —— 是背景，不是主角。"""
+        for it in self._amb:
+            p.save()
+            p.translate(it["x"] - ox, it["_y"] - oy)
+            p.rotate(it["rot"])
+            p.setOpacity(0.26 * it.get("_a", 1.0))
+            p.setPen(Qt.NoPen)
+            if it["kind"] == "leaf":
+                p.setBrush(QColor(232, 162, 89))
+                leaf = QPainterPath()
+                leaf.moveTo(0, -9)
+                leaf.quadTo(7.5, -2, 0, 9)
+                leaf.quadTo(-7.5, -2, 0, -9)
+                p.drawPath(leaf)
+                p.setPen(QPen(QColor(176, 108, 40, 160), 1.2,
+                              Qt.SolidLine, Qt.RoundCap))
+                p.drawLine(QPointF(0, -7), QPointF(0, 7))
+            else:
+                p.setBrush(QColor(246, 194, 78))
+                st = QPainterPath()
+                st.moveTo(0, -6)
+                st.quadTo(1.2, -1.2, 6, 0)
+                st.quadTo(1.2, 1.2, 0, 6)
+                st.quadTo(-1.2, 1.2, -6, 0)
+                st.quadTo(-1.2, -1.2, 0, -6)
+                p.drawPath(st)
+            p.restore()
+
     def paintEvent(self, e):
-        if not self._items:
+        if not self._items and not self._amb:
             return
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
         ox, oy = self.x(), self.y()
+        self._draw_ambient(p, ox, oy)
         p.setPen(Qt.NoPen)
         for (gx, gy, sz, a, age, col) in self._items:
             c = QColor(col)
@@ -731,3 +817,55 @@ class Crumb(QWidget):
         hl.moveTo(-7.0, -3.0)
         hl.quadTo(-4.0, -5.6, -0.5, -5.4)
         p.drawPath(hl)
+
+
+class BirthdayDialog(QDialog):
+    """生日设置小对话框：月 / 日两个下拉（与 PomoDialog 同一套奶油卡片
+    皮肤）。value 属性返回 "MM-DD"；选「不设」= 空串（清除生日）。
+    不猜生日：用户不设置就不庆祝。"""
+
+    def __init__(self, current="", parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("EJEE 的生日")
+        self.setModal(True)
+        self.value = None
+        self.setStyleSheet(DIALOG_QSS)
+        lay = QVBoxLayout(self)
+        tip = QLabel("给 EJEE 定个生日吧～\n（选「不设」就不过生日）")
+        lay.addWidget(tip)
+        row = QHBoxLayout()
+        self._m = QComboBox()
+        self._d = QComboBox()
+        self._m.addItem("不设", None)
+        for mth in range(1, 13):
+            self._m.addItem("%d 月" % mth, mth)
+        for dy in range(1, 32):
+            self._d.addItem("%d 日" % dy, dy)
+        if len(current) == 5:
+            try:
+                mm, dd = current.split("-")
+                self._m.setCurrentIndex(int(mm))       # 索引 0 = 不设
+                self._d.setCurrentIndex(int(dd) - 1)
+            except ValueError:
+                pass
+        row.addWidget(self._m)
+        row.addWidget(self._d)
+        lay.addLayout(row)
+        btns = QHBoxLayout()
+        ok = QPushButton("记住啦")
+        cancel = QPushButton("算了")
+        ok.clicked.connect(self.accept)
+        cancel.clicked.connect(self.reject)
+        btns.addStretch(1)
+        btns.addWidget(ok)
+        btns.addWidget(cancel)
+        lay.addLayout(btns)
+
+    def accept(self):
+        m = self._m.currentData()
+        d = self._d.currentData()
+        if m is None:
+            self.value = ""              # 「不设」：清除生日
+        else:
+            self.value = "%02d-%02d" % (int(m), int(d))
+        super().accept()

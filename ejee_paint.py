@@ -339,6 +339,9 @@ class EjeePaintMixin:
         sa, ma, ha = f["sa"], f["ma"], f["ha"]
         # 可怜层（面包掉地上）：表情与 angry 一致，这里把生气撇嘴也画出来
         pty = clamp(self._pity.v, 0.0, 1.0)
+        # 哈欠显形度：睡前犯困铺垫（张嘴渐大 -> 眼皮合上 -> 闭嘴时叹气收尾）
+        ysp = getattr(self, "_yawn_amt", None)
+        ya = clamp(ysp.v, 0.0, 1.0) if ysp is not None else 0.0
         # 嘴：ω 嘴恒显（官方设定），表情嘴从 ω 下缘展开——ω 下轮廓
         # 充当上唇，先画表情嘴再画 ω 精灵，重叠处 ω 笔画保持在最上层
         mr = self.coords["mouth"]
@@ -442,7 +445,7 @@ class EjeePaintMixin:
         # "先走"——4 倍速快出（约 0.05s 内退净），避免换嘴过渡时新旧嘴形长时间重叠成残影；
         # alt 的淡出也连续跟随（不在 angry→idle 的状态切换瞬间跳回全显）
         fade_alt = 0.0 if self.state in ("happy", "surprised") else alt
-        fade = max(fade_alt, sa, ha, ma)
+        fade = max(fade_alt, sa, ha, ma, ya)
         if fade > 0.005:
             p.setOpacity(clamp(1.0 - fade * 4.0, 0.0, 1.0))
         else:
@@ -459,6 +462,18 @@ class EjeePaintMixin:
             p.setBrush(Qt.NoBrush)
             p.drawEllipse(QPointF(mcx, mcy + mh * 0.06),
                           mw * 0.13, mh * 0.30)
+            p.setOpacity(1.0)
+        if ya > 0.02:
+            # 打哈欠：嘴张成竖椭圆（比睡眠圆嘴大得多），幅度跟包络走；
+            # ω 已按 ya 淡出。闭上那刻的叹气由 _tick 触发（身体一沉 +
+            # 眼睛半闭），"啊——呼"一气呵成
+            p.setOpacity(ya)
+            p.setPen(QPen(QBrush(QColor(OMEGA_COL)), 4.6, Qt.SolidLine,
+                          Qt.RoundCap))
+            p.setBrush(Qt.NoBrush)
+            p.drawEllipse(QPointF(mcx, mcy + mh * 0.10),
+                          mw * (0.10 + 0.10 * ya),
+                          mh * (0.16 + 0.62 * ya))
             p.setOpacity(1.0)
         if ha > 0.005 and sa < 0.5 and alt < 0.5 and ma < 0.3:
             # 饥饿波浪嘴：一条上下起伏的小波浪（4 段），比小圆洞更像
@@ -1547,6 +1562,25 @@ class EjeePaintMixin:
                                     cy + math.sin(ang) * r * 1.02), rr, rr)
         return path
 
+    # ---- 打字机气泡参数：14 字/秒，前 0.12s 停顿；≤6 字短句整句弹出 ----
+    TYPE_CPS = 14.0
+    TYPE_DELAY = 0.12
+    TYPE_MIN = 6
+
+    def _bubble_shown_text(self):
+        """打字机当前应显示的文本前缀：台词逐字冒出，像"在说话"而不是
+        "贴出一张纸"。预览模式返回全量（回归需与显示时机无关的确定性），
+        短句不吃打字机（"咕噜咕噜～"这类一口气说完更自然）。"""
+        txt = self.bubble_text
+        if not txt or len(txt) <= self.TYPE_MIN:
+            return txt
+        if getattr(sys.modules[type(self).__module__], "PREVIEW_MODE", False):
+            return txt
+        n = int((self.t - self.bubble_t0 - self.TYPE_DELAY) * self.TYPE_CPS)
+        if n >= len(txt):
+            return txt
+        return txt[:max(0, n)]
+
     def _draw_bubble(self, p):
         """对话气泡：框型 + 皮肤随情绪切换（主题表见 BUBBLE_THEMES）。
           cloud 奶油云泡泡（日常） / burst 带刺爆炸（生气） / round 圆泡泡（打嗝）
@@ -1721,17 +1755,37 @@ class EjeePaintMixin:
             p.drawArc(rr_, 296 * 16, 22 * 16)
         p.setFont(f)
         p.setPen(QPen(INK))
+        area = QRectF(bx + 15, y_b - h, w - 30, h - 26.0 if badges else h)
+        shown = self._bubble_shown_text()
         if badges:
             # 有徽章行：文字占上部，徽章画在底部那一条里
-            p.drawText(QRectF(bx + 15, y_b - h, w - 30, h - 26.0),
-                       Qt.AlignHCenter | Qt.AlignVCenter | Qt.TextWordWrap,
-                       self.bubble_text)
+            if shown == self.bubble_text:
+                p.drawText(area, Qt.AlignHCenter | Qt.AlignVCenter
+                           | Qt.TextWordWrap, self.bubble_text)
+            else:
+                self._draw_typing(p, fm, area, shown)
             self._draw_stat_badges(p, bx, y_b, w, badges)
+        elif shown == self.bubble_text:
+            p.drawText(area, Qt.AlignHCenter | Qt.AlignVCenter
+                       | Qt.TextWordWrap, self.bubble_text)
         else:
-            p.drawText(QRectF(bx + 15, y_b - h, w - 30, h),
-                       Qt.AlignHCenter | Qt.AlignVCenter | Qt.TextWordWrap,
-                       self.bubble_text)
+            self._draw_typing(p, fm, area, shown)
         p.restore()
+
+    def _draw_typing(self, p, fm, area, shown):
+        """打字机进行中的文字版面：按全量文本的中排位置定位（同宽下
+        前缀换行稳定），逐字向下补；说完一帧自动接回全量中排版式，
+        中间无跳变。前 0.12s 停顿期 shown 为空串，自然留白。"""
+        full_r = fm.boundingRect(0, 0, int(area.width()), 500,
+                                 Qt.TextWordWrap, self.bubble_text)
+        if not shown:
+            return
+        part_r = fm.boundingRect(0, 0, int(area.width()), 500,
+                                 Qt.TextWordWrap, shown)
+        top = area.top() + (area.height() - full_r.height()) / 2.0
+        p.drawText(QRectF(area.left(), top, area.width(),
+                          part_r.height() + 4.0),
+                   Qt.AlignHCenter | Qt.AlignTop | Qt.TextWordWrap, shown)
 
     def _draw_stat_badges(self, p, bx, y_b, w, badges):
         """陪伴档案徽章行：星星=陪伴天数 · 面包=喂食次数 · 爱心=摸头次数。

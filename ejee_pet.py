@@ -192,7 +192,7 @@ from PySide6.QtWidgets import (QApplication, QWidget, QSystemTrayIcon, QMenu,
 # P3-13 第三刀：UI 层（菜单/对话框/独立特效窗）搬到 ejee_ui.py，
 # 番茄钟时长配置随之过去；这里 import 回来保持引用不变
 from ejee_ui import (SoftMenu, PomoDialog, BreadCursor, JuiceOverlay,
-                     Crumb, _menu_icon, POMO_PRESETS,
+                     Crumb, BirthdayDialog, _menu_icon, POMO_PRESETS,
                      POMO_MIN_DEF, POMO_MIN_LO, POMO_MIN_HI)
 
 from ejee_paint import (EjeePaintMixin, clamp, EYE_DARK, OMEGA_COL,
@@ -329,6 +329,31 @@ DEFAULT_LINES = {
               "就那么一小块……能不能捡起来嘛。",
               "掉地上了啦……好心疼。",
               "那个……掉地上的面包……还能吃吗……"],
+    # ---- D 批次新增台词池 ----
+    # 被盯久了（鼠标悬停身上不动太久）
+    "stare": ["……你看啥？", "被我抓到了吧，在看我对不对！",
+              "脸、脸不要一直盯着看啦……", "要看就光明正大地看嘛，吧嗒。"],
+    "stare_night": ["……还不睡呀？", "这么晚……是在盯着我，还是在发呆？",
+                    "屏幕都亮了多久啦，快去睡嘛……"],
+    # 生日（当天问候替换）
+    "birthday": ["今天是我的生日！！谢谢你还记得！",
+                 "生日快乐给我自己！吧嗒吧嗒～"],
+    # 使用说明 / 相识前 3 天的新手提示（第 1 条喂食 / 第 2 条摸头 / 第 3 条菜单）
+    "tips": ["吧嗒～双击我可以喂面包哦，我超喜欢的。",
+             "摸摸我的头试试？小心摸太多我会跑掉哦。",
+             "右键我有好多菜单：番茄钟、穿透模式……慢慢研究！"],
+    # 拖拽松手撞墙
+    "bump": ["好痛！你撞到墙啦！", "哐当——墙壁表示很无辜。",
+             "疼疼疼，轻一点嘛……"],
+    # 缩放极值
+    "zoom_big": ["好、好大！这个尺寸泡泡都快装不下啦！",
+                 "巨大化伊吉，登场！有点不好意思……"],
+    "zoom_small": ["变小了……说话要凑近点听哦。", "迷你伊吉，迷你登场！"],
+    # 番茄钟最后一分钟
+    "pomo_last": ["最后一分钟啦！坚持住！", "马上就到——准备好了吗？"],
+    # 连续喂食（10 秒窗口内第 3 口起）
+    "feed_more": ["还吃！要变成橘子了吗！", "嘿嘿，再来一个也不是不行……",
+                  "你是想把我养胖吗！"],
 }
 
 
@@ -382,6 +407,38 @@ USER_STATES = ("mischief", "dizzy", "shy", "sleep")
 IDLE_EXPR_EVERY = (30.0, 60.0)      # 随机微表情（惊讶/庆祝）
 IDLE_WALK_EVERY = (60.0, 110.0)     # 屏幕边框散步
 IDLE_CHATTER_EVERY = (240.0, 480.0)  # 自言自语一句
+# ---- D 批次新增 ----
+YAWN_LEAD = 25.0                 # 睡前提前量：距入睡不足该秒数开始打哈欠
+YAWN_LEAD_NIGHT = 18.0           # 深夜（23-5 点）入睡阈值只有 90s，提前量缩短
+STARE_AFTER = 6.0                # 鼠标悬停不动多少秒后"被盯久了"开口
+STARE_CD = 25.0                  # 被盯久了台词冷却（说过会重新计时，不连环轰炸）
+ZOOM_BIG, ZOOM_SMALL = 2.2, 0.7  # 缩放极值专属台词阈值（Shift+滚轮范围 0.5~3.0）
+
+# 成就里程碑：键 -> (成就名, 达成台词)。达成日期记录在 _meta["ach"][键]，
+# 每项只庆祝一次；档案气泡汇报"已解锁 x/N 个"。
+ACH_DEFS = {
+    "day7":   ("陪伴满 7 天", "认识一整周啦！吧嗒～以后也请多关照。"),
+    "day30":  ("陪伴满 30 天", "整整一个月了！有你陪着，泡泡里都是甜的。"),
+    "day100": ("陪伴满 100 天", "一百天！你已经是我最重要的家人啦。"),
+    "day365": ("陪伴满一年", "一周年快乐！明年、后年，也要一起过哦。"),
+    "fed50":  ("投喂 50 次", "50 个吐司下肚……幸福得冒泡啦！"),
+    "fed200": ("投喂 200 次", "200 次投喂达成！你是世界一级饲养员！"),
+    "pat100": ("摸头 100 次", "被你摸了一百次头，咕噜咕噜～好幸福呀。"),
+    "pat500": ("摸头 500 次", "500 次摸头！再摸下去头要被摸秃啦（开心）。"),
+    "pomo10": ("番茄 10 颗", "10 颗番茄收成！专注小能手就是你本人。"),
+    "pomo50": ("番茄 50 颗", "50 颗番茄！专注大师，我认证的！"),
+}
+
+# 固定节日彩蛋（"月-日" -> 当天首次问候的替换台词）
+FESTIVALS = {
+    "01-01": "新年快乐！今年也一起吧嗒吧嗒地过吧～",
+    "02-14": "今天满街都是巧克力的味道……给你留了一颗虚拟的！",
+    "05-01": "假期快乐！泡泡里躺平的感觉，懂？",
+    "06-01": "儿童节快乐！今天允许你幼稚一整天。",
+    "10-01": "放假啦！去晒晒太阳吧，我看着家。",
+    "12-24": "平安夜～苹果吃了吗？",
+    "12-25": "圣诞快乐！我把泡泡装饰成雪球啦（脑补）。",
+}
 
 # ------- 情绪状态参数表（目标值，状态间做指数平滑） -------
 # eye_sx/sy 眼睛缩放; eye_dy 眼睛下移; eye_rot 眼睛外角下垂旋转;
@@ -571,6 +628,12 @@ class EjeePet(EjeePaintMixin, QWidget):
             # 首次启动（或旧存档迁移）：把今天记为相识日，立刻落盘
             self._meta["first_seen"] = time.strftime("%Y-%m-%d")
             self._save()
+        # 成就/里程碑（键 -> 达成日期）与累计番茄数、生日（跨运行持久）
+        ach_raw = data.get("ach")
+        self._meta["ach"] = dict(ach_raw) if isinstance(ach_raw, dict) else {}
+        self._meta["pomo_total"] = _to_int(data.get("pomo_total"), 0)
+        bd = str(data.get("birthday") or "")
+        self._meta["birthday"] = bd if len(bd) == 5 else ""
         try:
             self._restore_pos = (int(data["x"]), int(data["y"]))
         except (KeyError, TypeError, ValueError):
@@ -633,6 +696,21 @@ class EjeePet(EjeePaintMixin, QWidget):
         self._nod_until = 0.0               # 摇头结束时刻
         self._nod_dur = 1.15                # 一次摇头持续时长
         self._nod_n = 0                     # 已摇头次数（决定幅度）
+        # ---- D 批次：睡前哈欠铺垫 ----
+        self._yawn_amt = Spring(0.0, 110, 13)   # 哈欠张嘴显形度 0..1
+        self._yawn_t0 = None                    # 当前一次哈欠开始时刻
+        self._yawns_left = 0                    # 睡前还要打的哈欠数
+        self._yawn_next = 1e9                   # 下一次哈欠的最早时刻
+        # ---- D 批次：被盯久了（悬停不动太久）----
+        self._hover_t0 = None                   # 悬停（基本不动）起始时刻
+        self._hover_anchor = None               # 悬停锚定点（QPoint）
+        self._stare_cd = 0.0                    # 台词冷却截止
+        # ---- D 批次：思考/得意微表情、台词节流与喂食连击 ----
+        self._think_until = -1.0                # 思考微表情截止（视线被拉上去）
+        self._feed_burst_n = 0                  # 10s 窗口内连续喂食口数
+        self._feed_burst_t0 = -99.0
+        self._next_bump_line = 0.0              # 撞墙台词节流
+        self._pomo_last_said = False            # 番茄钟最后一分钟台词（每段一次）
 
         self.clock = QElapsedTimer()
         self.clock.start()
@@ -795,7 +873,9 @@ class EjeePet(EjeePaintMixin, QWidget):
                 self.bubble_style = "zzz"
 
     def _maybe_greet(self):
-        """每天首次见面打一声招呼；隔了很久才回来有专属问候。"""
+        """每天首次见面打一声招呼；隔了很久才回来有专属问候；
+        生日/节日当天换彩蛋问候；相识前 3 天追加一条新手提示；
+        天数类成就也在跨天时刻结算。"""
         today = time.strftime("%Y-%m-%d")
         if self._meta.get("greet_day") == today:
             return
@@ -805,7 +885,75 @@ class EjeePet(EjeePaintMixin, QWidget):
         text = self._line(self._bucket())
         if gap > 10 * 3600 and self._meta.get("last_seen", 0) > 0:
             text = "你终于回来了！" + text
+        md = time.strftime("%m-%d")
+        if self._meta.get("birthday") == md:
+            # 生日：彩纸 + 专属问候（庆祝跳用 celebrate 通道）
+            text = self._line("birthday")
+            self._celebrate_until = self.t + 2.0
+            self._sq.kick(3.0)
+            for i in range(16):
+                self.particles.append(Particle(
+                    "confetti", self.BCX + random.uniform(-60, 60),
+                    self.head_top + random.uniform(-4, 20), self.t))
+        elif md in FESTIVALS:
+            text = FESTIVALS[md]
         self._say(text, 3.6)
+        self._check_ach()               # day7/30/100/365 跨天在这里结算
+        # 相识前 3 天：各一条轻提示（singleShot 在问候气泡说完后弹）
+        day_n = self._day_index()
+        tips = self._lines.get("tips") or DEFAULT_LINES["tips"]
+        if 1 <= day_n <= 3 and day_n - 1 < len(tips):
+            tip = tips[day_n - 1]
+            QTimer.singleShot(4300, lambda: self._say(tip, 3.4))
+
+    def _day_index(self):
+        """相识第几天（相识日 = 第 1 天）。first_seen 非法时返回大数。"""
+        try:
+            d0 = time.strptime(self._meta.get("first_seen", ""), "%Y-%m-%d")
+        except ValueError:
+            return 999
+        return int((time.time() - time.mktime(d0)) / 86400.0) + 1
+
+    def _check_ach(self, announce=True):
+        """成就结算：达成的里程碑记入 _meta["ach"]（每项只庆祝一次）。
+        返回本次新解锁数量。announce 时庆祝（彩纸 + 专属台词，
+        当前气泡还在说话则等它说完再庆祝）。"""
+        m = self._meta
+        days = self._companion_days()
+        vals = {"day7": days >= 7, "day30": days >= 30,
+                "day100": days >= 100, "day365": days >= 365,
+                "fed50": m.get("fed", 0) >= 50,
+                "fed200": m.get("fed", 0) >= 200,
+                "pat100": m.get("pets", 0) >= 100,
+                "pat500": m.get("pets", 0) >= 500,
+                "pomo10": m.get("pomo_total", 0) >= 10,
+                "pomo50": m.get("pomo_total", 0) >= 50}
+        ach = m.setdefault("ach", {})
+        newly = [k for k, ok in vals.items() if ok and k not in ach]
+        if not newly:
+            return 0
+        today = time.strftime("%Y-%m-%d")
+        for k in newly:
+            ach[k] = today
+        self._save()
+        if announce:
+            k = newly[-1]               # 多个同刻解锁：庆祝最后一个
+            delay = 0
+            if self.bubble_until > self.t:
+                delay = int((self.bubble_until - self.t + 0.3) * 1000)
+            QTimer.singleShot(delay, lambda: self._ach_cheer(k))
+        return len(newly)
+
+    def _ach_cheer(self, key):
+        """成就庆祝：跳一下 + 彩纸 + 专属台词 + 成就名。"""
+        name, phrase = ACH_DEFS.get(key, (key, "成就达成！"))
+        self._celebrate_until = self.t + 1.6
+        self._sq.kick(2.4)
+        self._say("%s\n解锁成就「%s」" % (phrase, name), 4.2)
+        for i in range(14):
+            self.particles.append(Particle(
+                "confetti", self.BCX + random.uniform(-60, 60),
+                self.head_top + random.uniform(-4, 20), self.t))
 
     def _companion_days(self):
         """陪伴天数：从 first_seen（相识日）到今天，最少算 1 天。"""
@@ -825,10 +973,11 @@ class EjeePet(EjeePaintMixin, QWidget):
         days = self._companion_days()
         hug = self._meta.get("hunger", 0.0)
         mood = "有点饿了……" if hug < 30.0 else "肚子饱饱的！"
+        n_ach = len(self._meta.get("ach", {}))
         txt = ("我已经陪你 %d 天啦～\n喂过我 %d 次，摸了我 %d 次。\n"
-               "现在饱食度 %d%%，%s"
+               "现在饱食度 %d%%，%s\n已解锁成就 %d/%d 个"
                % (days, self._meta.get("fed", 0), self._meta.get("pets", 0),
-                  int(round(hug)), mood))
+                  int(round(hug)), mood, n_ach, len(ACH_DEFS)))
         self._say(txt, 6.0)
         # 徽章行：星星=天数 · 面包=喂食 · 爱心=摸头（绘制见 _draw_stat_badges）
         self.bubble_badges = [
@@ -859,6 +1008,7 @@ class EjeePet(EjeePaintMixin, QWidget):
                 "heart", self.BCX + random.uniform(-42, 42),
                 self.head_top + random.uniform(-2, 14), self.t))
         self._meta["pets"] = self._meta.get("pets", 0) + 1
+        self._check_ach()               # pat100/pat500 在这里结算
 
     def _start_shy(self):
         """傲娇躲避：被连摸 5 下，直接闪现到屏幕另一侧（不做身体形变 /
@@ -1130,6 +1280,7 @@ class EjeePet(EjeePaintMixin, QWidget):
         self._pomo_end = self.t + mins * 60.0
         self._pomo_total = mins * 60.0
         self._pomo_txt_t = self.t
+        self._pomo_last_said = False    # 最后一分钟的加油台词（每段一次）
         self._say(self._line("pomo_start"), 3.0)
         self._sq.kick(1.6)
         self._pomo_text("停止番茄钟（剩 %d 分）" % mins)
@@ -1291,11 +1442,14 @@ class EjeePet(EjeePaintMixin, QWidget):
             return
         # 深度空闲（优先级最低）：SLEEP_AFTER 秒无交互 -> 睡眠；
         # 深夜（23-5 点）困意提前，90 秒就犯困。钻进泡泡前嘟囔一句（设定：
-        # EJEE 的爱好是在泡泡里睡觉）
+        # EJEE 的爱好是在泡泡里睡觉）。
+        # 睡前哈欠铺垫没打完就先不睡（_yawns_left 在交互时清零，不会卡死：
+        # 该状态只在无交互窗口内置位，有交互立即回到 idle_for 起点重新计）。
         hour = time.localtime().tm_hour
         thresh = 90.0 if (hour >= 23 or hour < 5) else SLEEP_AFTER
         if self.phase == "idle" \
-                and self.t - self.last_interact > thresh:
+                and self.t - self.last_interact > thresh \
+                and self._yawn_t0 is None and self._yawns_left <= 0:
             if self.state != "sleep" and self.bubble_until < self.t \
                     and not self._pass:
                 self._say(self._line("sleep_in"), 2.6, "zzz")
@@ -1317,10 +1471,20 @@ class EjeePet(EjeePaintMixin, QWidget):
             if not self.blink_pending2:
                 self.next_blink = self.t + self._rand_blink_delay()
 
-        # happy 子相位推进：面包吃进去（张嘴→吞入→闭嘴），随后满足收尾
+        # happy 子相位推进：面包吃进去（张嘴→吞入→闭嘴），随后进入
+        # 咀嚼回味（0.9s 两次小开合），咀嚼完才满足地说话
         if self.phase == "bread" and self.t - self.phase_t0 >= 0.55:
+            self.phase = "chew"
+            self.phase_t0 = self.t
+        if self.phase == "chew" and self.t - self.phase_t0 >= 0.9:
             self._end_interact()
-            self._say(self._line("feed"), 2.8)
+            self._sq.kick(0.5)              # 满足的小 squish
+            if self._feed_burst_n >= 3:
+                self._say(self._line("feed_more"), 2.8)
+            elif self._meta.get("hunger", 80.0) < 12.0:
+                self._say("终于想起来了……！" + self._line("feed"), 3.0)
+            else:
+                self._say(self._line("feed"), 2.8)
 
         # 番茄钟：到点庆祝 + 提示音；托盘文案 15s 节流刷新倒计时
         if self._pomo_end is not None:
@@ -1330,6 +1494,9 @@ class EjeePet(EjeePaintMixin, QWidget):
                 self._pomo_text("番茄钟 %d 分钟" % self._pomo_min())
                 # 收尾仪式：台词按本次完成的番茄数递进 + 一次明确的跳起
                 self._pomo_n += 1
+                self._pomo_last_said = False
+                self._meta["pomo_total"] = self._meta.get("pomo_total", 0) + 1
+                self._check_ach()       # pomo10/pomo50 在这里结算
                 n = self._pomo_n
                 if n <= 1:
                     cheer = "第一颗番茄收成啦！跳一个庆祝～"
@@ -1350,9 +1517,15 @@ class EjeePet(EjeePaintMixin, QWidget):
                 self._pomo_text(
                     f"停止番茄钟（剩 {max(1, int(rem / 60) + 1)} 分）")
 
-        # 番茄钟：最后一分钟转为"紧张期待"（牌子转红 + 轻抖 + 瞪眼）
+        # 番茄钟：最后一分钟转为"紧张期待"（牌子转红 + 轻抖 + 瞪眼），
+        # 并只在进入那一瞬间说一句加油（每段番茄钟最多一次）
         left = (self._pomo_end - self.t) if self._pomo_end is not None else 999.0
         self._pomo_nrv.step(1.0 if 0.0 < left <= 60.0 else 0.0, dt)
+        if 0.0 < left <= 60.0 and not self._pomo_last_said:
+            self._pomo_last_said = True
+            if (not self._meta.get("silent") and not self._pass
+                    and self.bubble_until < self.t):
+                self._say(self._line("pomo_last"), 2.6)
         # 气泡会占到右上角：倒计时牌此时往下让一让，避免压字
         self._tag_dy.step(
             40.0 if (self.bubble_text and self.t < self.bubble_until) else 0.0,
@@ -1509,6 +1682,57 @@ class EjeePet(EjeePaintMixin, QWidget):
             if self.t - self.phase_t0 >= 0.72:
                 self._end_interact()
 
+        # ---- 睡前哈欠铺垫：距入睡不足提前量时先打 1~2 个哈欠再睡 ----
+        # 生物感：从"没 Interaction"到"睡着"之间有一段可见的犯困过程。
+        # 哈欠被任何交互打断（_touch 清零）；深夜提前量更短（阈值只有 90s）。
+        hour_n = time.localtime().tm_hour
+        night_n = hour_n >= 23 or hour_n < 5
+        thresh_n = 90.0 if night_n else SLEEP_AFTER
+        idle_for = self.t - self.last_interact
+        if (self.state == "idle" and self.phase == "idle" and not self._pass
+                and not self._dragging):
+            lead = YAWN_LEAD_NIGHT if night_n else YAWN_LEAD
+            if (self._yawns_left <= 0 and self._yawn_t0 is None
+                    and thresh_n - lead < idle_for < thresh_n - 1.0):
+                self._yawns_left = 1 if night_n else random.choice((1, 2))
+                self._yawn_next = self.t
+            if (self._yawns_left > 0 and self._yawn_t0 is None
+                    and self.t >= self._yawn_next):
+                self._yawn_t0 = self.t
+        else:
+            self._yawn_t0 = None
+            self._yawns_left = 0
+        # 哈欠包络：0.45s 张开 -> 0.25s 保持 -> 0.30s 闭上；闭上那刻轻叹一口
+        yawn_t = 0.0
+        if self._yawn_t0 is not None:
+            e_y = self.t - self._yawn_t0
+            if e_y < 0.45:
+                yawn_t = math.sin(math.pi * 0.5 * e_y / 0.45)
+            elif e_y < 0.70:
+                yawn_t = 1.0
+            elif e_y < 1.00:
+                yawn_t = math.cos(math.pi * 0.5 * (e_y - 0.70) / 0.30)
+            else:
+                self._sigh_t0 = self.t
+                self._yawns_left -= 1
+                self._yawn_t0 = None
+                self._yawn_next = self.t + random.uniform(1.0, 2.2)
+        self._yawn_amt.step(yawn_t, dt)
+
+        # 被盯久了：光标停在身上不动超过 STARE_AFTER 且平静 -> 开口一句
+        # （深夜换"还不睡呀"版；说过重新计时 + 冷却，不连环轰炸）
+        if (self._hover_t0 is not None
+                and self.t - self._hover_t0 > STARE_AFTER
+                and self.state == "idle" and self.phase == "idle"
+                and not self._pass and self._pomo_end is None
+                and not self._meta.get("silent")
+                and self.bubble_until < self.t
+                and self.t >= self._post_lock and self.t >= self._stare_cd):
+            self._stare_cd = self.t + STARE_CD
+            self._hover_t0 = self.t
+            self._sq.kick(0.5)
+            self._say(self._line("stare_night" if night_n else "stare"), 2.6)
+
         # 状态与参数推进（弹簧动力学：惯性 + 回弹 + Overshoot）
         self._decide_state()
         tgt = P[self.state]
@@ -1528,11 +1752,12 @@ class EjeePet(EjeePaintMixin, QWidget):
         # 嘴形交叉渐变：替代嘴形（happy 开合/圆嘴/瘪嘴）显形度弹簧，
         # happy 进食期间保持显形（咀嚼开合到闭的瞬间不闪回 ω 嘴）
         op_now = self._mouth_open()
-        # 嘴形目标：surprised/angry/happy进食 之外，可怜层（pty）也要顶到
-        # 全显，让掉面包时的嘴形与 angry 一致（生气撇嘴 + 人中）。
+        # 嘴形目标：surprised/angry/happy进食（含咀嚼回味）之外，可怜层
+        # （pty）也要顶到全显，让掉面包时的嘴形与 angry 一致（生气撇嘴 + 人中）。
         alt_tgt = max(1.0 if self.state in ("surprised", "angry") \
                       or (self.state == "happy"
-                          and (op_now > 0.05 or self.phase == "bread"))
+                          and (op_now > 0.05
+                               or self.phase in ("bread", "chew")))
                       else 0.0, pty)
         self.mouth_alt.step(alt_tgt, dt)
         # 官方五表情眼形：happy 双眯眼弧 / surprised 左眼眨眼
@@ -1639,6 +1864,13 @@ class EjeePet(EjeePaintMixin, QWidget):
             if hit:
                 self._sq.kick(2.6)
                 self.angry_until = self.t + 2.0
+                # 撞墙吐槽（节流 + 免打扰门控）：松手惯性太猛时的一句
+                if (self.t >= self._next_bump_line
+                        and not self._meta.get("silent")
+                        and not self._pass
+                        and self.bubble_until < self.t):
+                    self._next_bump_line = self.t + 12.0
+                    self._say(self._line("bump"), 2.4)
             self._glide = [gx_, gy_]
             if math.hypot(gx_, gy_) < 40:
                 self._glide = None
@@ -1656,11 +1888,17 @@ class EjeePet(EjeePaintMixin, QWidget):
             self._zooming = False
             self._zoom_anchor = None
             self._save()
-            # 缩放手势收尾：尺寸确实变了才说一句（带冷却）
+            # 缩放手势收尾：尺寸确实变了才说一句（带冷却）；
+            # 缩到极值有专属台词（巨大化/迷你化）
             if (abs(self.size - self._zoom_from) > 0.04
                     and self.t >= self._next_zoom_line):
                 self._next_zoom_line = self.t + 15.0
-                self._say(self._line("zoom"), 2.4)
+                if self.size >= ZOOM_BIG:
+                    self._say(self._line("zoom_big"), 2.4)
+                elif self.size <= ZOOM_SMALL:
+                    self._say(self._line("zoom_small"), 2.4)
+                else:
+                    self._say(self._line("zoom"), 2.4)
 
         # 待机微动作调度（吐泡泡 / 左右张望 / 双连眨）
         if self.state == "idle" and self.phase == "idle" \
@@ -1680,7 +1918,9 @@ class EjeePet(EjeePaintMixin, QWidget):
                 self.blink_pending2 = True
             self._next_micro = self.t + random.uniform(9, 22)
 
-        # 随机微表情调度（30~60s 一次，短促惊讶或庆祝，1.3s 后回 idle）；
+        # 随机微表情调度（30~60s 一次，1.3s 后回 idle）：
+        #   35% 惊讶 / 30% 庆祝（跳+彩纸）/ 20% 思考（眼珠上转+"?"）
+        #   / 15% 得意（眯眼+鼻尖小蒸汽，不跳不彩纸）；
         # 饥饿时保持可怜的虚弱态，不再间歇切换表情；
         # 用户操作引发的状态刚结束（_post_lock 内）也先按住不冒；
         # 番茄钟专注期 / 静默模式同样免打扰；
@@ -1691,9 +1931,10 @@ class EjeePet(EjeePaintMixin, QWidget):
                 and not self._meta.get("silent") \
                 and self.t >= self._post_lock \
                 and self.t >= self._next_expr:
-            if random.random() < 0.5:
+            r = random.random()
+            if r < 0.35:
                 self.surprised_until = self.t + 1.3
-            else:
+            elif r < 0.65:
                 self._celebrate_until = self.t + 1.3
                 self._sq.kick(2.2)          # 庆祝小跳（挤压形变）
                 for i in range(10):
@@ -1701,6 +1942,20 @@ class EjeePet(EjeePaintMixin, QWidget):
                         "confetti",
                         self.BCX + random.uniform(-55, 55),
                         self.head_top + random.uniform(-4, 20), self.t))
+            elif r < 0.85:
+                # 思考：眼珠上转（_gaze_target 有专门分支）+ 头顶"？"飘字
+                self._think_until = self.t + 1.6
+                self.floats.append(("?", self.BCX + 46,
+                                    self.head_top - 34, self.t))
+            else:
+                # 得意：眯眼弧（happy 通道）+ 鼻尖一缕小蒸汽 + 飘字
+                self._celebrate_until = self.t + 1.1
+                self._sq.kick(0.6)
+                self.particles.append(Particle(
+                    "steam", self.mouth_center[0] + 14,
+                    self.mouth_center[1] - 6, self.t))
+                self.floats.append(("哼哼～", self.BCX + 40,
+                                    self.head_top - 30, self.t))
             self._next_expr = self.t + random.uniform(*IDLE_EXPR_EVERY)
             if (random.random() < 0.10 and not self._pass
                     and self.bubble_until < self.t):
@@ -1772,6 +2027,12 @@ class EjeePet(EjeePaintMixin, QWidget):
             del self.particles[:len(self.particles) - PARTICLE_MAX]
         if self.floats:
             self.floats = [f for f in self.floats if self.t - f[3] < 1.2]
+        # 氛围飘浮物（全局特效层）：小叶子/星点偶尔横穿屏幕，纯背景氛围。
+        # 不进粒子列表、不进视线系统，预览模式关闭（回归确定性）。
+        if not PREVIEW_MODE:
+            jf2 = getattr(self, "_juice_fx", None)
+            if jf2 is not None:
+                jf2.ambient_step(dt, self._scr_rect())
         # 自适应帧率：有戏看保持 30fps，纯静止呼吸降到 20fps（省空转唤醒）。
         # 预览/仿真不走 QTimer（scaffold 里 timer=None），跳过。
         if self.timer is not None:
@@ -1795,17 +2056,20 @@ class EjeePet(EjeePaintMixin, QWidget):
         return random.uniform(2.0, 6.0)
 
     def _blink_scale(self):
-        if self.blink_t0 is None:
-            return 1.0
-        d = self.t - self.blink_t0
-        DUR = 0.16
-        if d >= DUR:
-            self.blink_t0 = None
-            if self.blink_pending2:
-                self.blink_pending2 = False
-                self.next_blink = self.t + 0.12
-            return 1.0
-        return 1.0 - 0.96 * math.sin(math.pi * d / DUR)
+        blink = 1.0
+        if self.blink_t0 is not None:
+            d = self.t - self.blink_t0
+            DUR = 0.16
+            if d >= DUR:
+                self.blink_t0 = None
+                if self.blink_pending2:
+                    self.blink_pending2 = False
+                    self.next_blink = self.t + 0.12
+            else:
+                blink = 1.0 - 0.96 * math.sin(math.pi * d / DUR)
+        # 打哈欠：眼皮跟着张嘴的幅度合上（眨眼因子是眼睛允许的缩放通道）
+        ya = clamp(self._yawn_amt.v, 0.0, 1.0)
+        return blink * (1.0 - 0.92 * ya)
 
     def _tail_amp(self):
         """尾巴摆幅（设计 px）：慢波调制 + 情绪系数，产生不规律轻摆。
@@ -1829,6 +2093,9 @@ class EjeePet(EjeePaintMixin, QWidget):
             left = self._look_until - self.t
             d = self._look_dir if left > 1.1 else -self._look_dir
             return d * 0.9, -0.15, d * 2.0
+        # 思考微表情：眼珠上转（像在想事情，头顶飘"？"）
+        if self.t < self._think_until:
+            return 0.0, -0.9, 0.0
         gx = gy = 0.0
         if QApplication.instance() is not None:
             # 掉地上的面包渣：视线被它吸走（不看鼠标了，盯着残渣）
@@ -1968,11 +2235,25 @@ class EjeePet(EjeePaintMixin, QWidget):
 
         self._draw_foreground(p, f)         # 组外特效与状态牌
 
+        # 深夜氛围（23-5 点）：整幅叠一层深蓝夜色，桌宠夜间不扎眼，
+        # 与"深夜犯困"的行为线叙事闭环。预览模式关闭（回归需与时段无关）。
+        dim = self._night_dim()
+        if dim > 0:
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(10, 16, 40, dim))
+            p.drawRect(QRectF(-4.0, -4.0, DW + 8.0, DH + 8.0))
+
         # 橘子汁特效层：把汁滴换算到全局屏幕坐标后交给独立的透明窗绘制，
         # 这样汁水能飞出宠物自己的小窗口，360° 无边界溅射（无汁滴则隐藏）。
         jf = getattr(self, "_juice_fx", None)
         if jf is not None and not PREVIEW_MODE:
             jf.refresh(self)
+
+    @staticmethod
+    def _night_dim():
+        """深夜（23-5 点）夜色叠加层的 alpha；白天 0。供 sim 断言。"""
+        h = time.localtime().tm_hour
+        return 34 if (h >= 23 or h < 5) else 0
 
     def _nod_offset(self):
         """摇头位移（设计 px）：吃饱还喂时，脸左右甩三下（幅度指数衰减）。
@@ -1985,25 +2266,36 @@ class EjeePet(EjeePaintMixin, QWidget):
         return amp * math.sin(el / 0.42 * math.tau)
 
     def _mouth_open(self):
-        """happy 状态下的嘴开合：0=闭，1=全开（张嘴→吞入→闭嘴）。"""
+        """happy 状态下的嘴开合：0=闭，1=全开。
+        bread 相位：张嘴→吞入→闭嘴；chew 相位：两次幅度递减的小开合。"""
         if self.state != "happy":
             return 0.0
         if self.phase == "bread":
             k = clamp((self.t - self.phase_t0) / 0.55, 0, 1)
             return math.sin(math.pi * min(1.0, k * 1.25))
+        if self.phase == "chew":
+            e = self.t - self.phase_t0
+            k1 = clamp((e - 0.05) / 0.30, 0.0, 1.0)
+            k2 = clamp((e - 0.50) / 0.26, 0.0, 1.0)
+            o = 0.55 * math.sin(math.pi * k1) + 0.38 * math.sin(math.pi * k2)
+            return clamp(o, 0.0, 0.85)
         return 0.0
 
     # ---------- 特效绘制 ----------
     # ================= 互动 =================
     def _touch(self):
         """任何交互的统一入口：更新 last_interact；睡眠中则触发
-        伸懒腰唤醒动画（先压扁 -> 0.38s 后拉长回弹）。"""
+        伸懒腰唤醒动画（先压扁 -> 0.38s 后拉长回弹）。
+        交互同时打断睡前哈欠铺垫线（人在，不困了）。"""
         if self.state == "sleep" and self.phase == "idle":
             self.phase = "wake"
             self.phase_t0 = self.t
             self._wake2 = False
             self._sq.kick(-2.0)
         self.last_interact = self.t
+        self._yawn_t0 = None
+        self._yawns_left = 0
+        self._yawn_next = 1e9
 
     def feed(self):
         """喂一口面包（+35 饱食度）。
@@ -2046,6 +2338,13 @@ class EjeePet(EjeePaintMixin, QWidget):
         self._meta["fed"] = self._meta.get("fed", 0) + 1
         # +35 溢出 100 的部分丢弃（65~99 也能喂，吃完就是 100）
         self._meta["hunger"] = clamp(before + 35.0, 0.0, 100.0)
+        # 喂食连击（10s 窗口内）：第 3 口起咀嚼完改说变体台词
+        if self.t - self._feed_burst_t0 < 10.0:
+            self._feed_burst_n += 1
+        else:
+            self._feed_burst_n = 1
+        self._feed_burst_t0 = self.t
+        self._check_ach()            # fed50/fed200 在这里结算
 
     # ---------- 拖拽投喂（面包跟随鼠标，松在嘴边才吃） ----------
     def _mouth_global(self):
@@ -2269,10 +2568,14 @@ class EjeePet(EjeePaintMixin, QWidget):
 
     def enterEvent(self, e):
         self._hover = True            # 悬停：饿了会努力抬头看鼠标
+        # 悬停计时（被盯久了判定）：进身即起表，光标大动会重置
+        self._hover_t0 = self.t
+        self._hover_anchor = QCursor.pos()
         super().enterEvent(e)
 
     def leaveEvent(self, e):
         self._hover = False           # 移开：又无力地趴下去
+        self._hover_t0 = None         # 盯人计时作废
         super().leaveEvent(e)
 
     def _zoom_steps(self, delta, gp):
@@ -2339,6 +2642,14 @@ class EjeePet(EjeePaintMixin, QWidget):
     def mouseMoveEvent(self, e):
         self._touch()          # 悬停唤醒睡眠（需 mouseTracking）
         self._hover = True     # 移动中：眼巴巴跟着鼠标看
+        # 被盯久了的计时：光标基本没动就保持起表时刻，大幅移动重置
+        gp0 = e.globalPosition().toPoint()
+        if self._hover_t0 is None or self._hover_anchor is None:
+            self._hover_t0 = self.t
+            self._hover_anchor = gp0
+        elif (gp0 - self._hover_anchor).manhattanLength() > 24:
+            self._hover_t0 = self.t
+            self._hover_anchor = gp0
         if self._press_pos is None:
             return
         gp = e.globalPosition().toPoint()
@@ -2491,6 +2802,15 @@ class EjeePet(EjeePaintMixin, QWidget):
         pm = _to_int(d.get("pomo_min"), self._meta.get("pomo_min",
                                                        POMO_MIN_DEF))
         self._meta["pomo_min"] = clamp(pm, POMO_MIN_LO, POMO_MIN_HI)
+        # 成就/累计番茄/生日/提示已读：导出导入一并带走（键不合法就忽略）
+        ach_raw = d.get("ach")
+        if isinstance(ach_raw, dict):
+            self._meta["ach"] = dict(ach_raw)
+        self._meta["pomo_total"] = _to_int(d.get("pomo_total"),
+                                           self._meta.get("pomo_total", 0))
+        bd = str(d.get("birthday") or "")
+        if len(bd) == 5:
+            self._meta["birthday"] = bd
         self._save()
         self._say("欢迎回来，这些日子我都记起来啦！", 3.2)
 
@@ -2509,8 +2829,61 @@ class EjeePet(EjeePaintMixin, QWidget):
         self._meta["hunger"] = 80.0
         self._meta["first_seen"] = time.strftime("%Y-%m-%d")
         self._meta["greet_day"] = ""
+        # 成就/累计番茄/生日一并清空（陪伴记忆重开一局）
+        self._meta["ach"] = {}
+        self._meta["pomo_total"] = 0
+        self._meta["birthday"] = ""
         self._save()
         self._say("记忆清空啦……我们、重新认识一下吧？", 3.6)
+
+    def _open_data_dir(self):
+        """打开数据目录：ejee_save.json / lines.json 都在这里——
+        台词自定义能力（外置 lines.json 覆盖内置台词）从此可被发现。"""
+        self._touch()
+        try:
+            if sys.platform == "win32":
+                os.startfile(APP_DIR)       # noqa: S606
+            else:
+                import subprocess
+                subprocess.Popen(["xdg-open", APP_DIR])
+        except OSError:
+            pass
+
+    def _show_tips(self):
+        """使用说明：气泡连播三条操作提示（喂食 / 摸头 / 菜单）。
+        看过一次就记档（首次引导只认相识天数，不再重复）。"""
+        self._touch()
+        tips = list(self._lines.get("tips") or DEFAULT_LINES["tips"])
+        self._meta["tips_seen"] = True
+        self._save()
+
+        def _next(i=0):
+            if i >= len(tips):
+                return
+            self._say(tips[i], 3.4)
+            QTimer.singleShot(3800, lambda: _next(i + 1))
+
+        _next()
+
+    def _set_birthday(self):
+        """设置 EJEE 的生日（月-日）：当天首次问候换生日彩蛋 + 彩纸；
+        选"不设"即清除。不猜生日、不设就不庆祝。"""
+        self._touch()
+        dlg = BirthdayDialog(self._meta.get("birthday", ""))
+        dlg.adjustSize()
+        scr = self._scr_rect()
+        x = int(clamp(self.x() + (self.width() - dlg.width()) // 2,
+                      scr.left() + 8, scr.right() - dlg.width() - 8))
+        y = int(clamp(self.y() - dlg.height() - 6, scr.top() + 8,
+                      scr.bottom() - dlg.height() - 8))
+        dlg.move(x, y)
+        if dlg.exec() == QDialog.Accepted:
+            self._meta["birthday"] = dlg.value or ""
+            self._save()
+            if dlg.value:
+                self._say("记住了！到时候要给我庆祝哦。", 3.0)
+            else:
+                self._say("好吧……那就不庆祝了。", 2.6)
 
     def _build_menu(self):
         """构建共享右键菜单（窗口右键 / 穿透模式全局右键钩子共用）。
@@ -2520,6 +2893,12 @@ class EjeePet(EjeePaintMixin, QWidget):
         act_take.triggered.connect(self._take_bread)
         menu.addAction(_menu_icon("heart"), "陪伴档案").triggered.connect(
             self._show_stats)
+        menu.addAction(_menu_icon("star"), "设置生日…").triggered.connect(
+            self._set_birthday)
+        menu.addAction(_menu_icon("eye"), "使用说明").triggered.connect(
+            self._show_tips)
+        menu.addAction(_menu_icon("reset"), "打开数据目录…").triggered.connect(
+            self._open_data_dir)
         act_pomo = menu.addAction(_menu_icon("clock"), self._pomo_label())
         act_pomo.triggered.connect(self._pomo_toggle)
         menu.addSeparator()
@@ -2689,6 +3068,10 @@ class EjeePet(EjeePaintMixin, QWidget):
             self._take_bread)
         menu.addAction(_menu_icon("heart"), "陪伴档案").triggered.connect(
             self._show_stats)
+        menu.addAction(_menu_icon("star"), "设置生日…").triggered.connect(
+            self._set_birthday)
+        menu.addAction(_menu_icon("eye"), "打开数据目录…").triggered.connect(
+            self._open_data_dir)
         self.tray_act_pomo = menu.addAction(_menu_icon("clock"),
                                             "开始番茄钟…")
         self.tray_act_pomo.triggered.connect(self._pomo_toggle)

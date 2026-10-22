@@ -163,6 +163,22 @@ def make_pet(app, w=400, h=340, x=200, y=300):
     pet._hungry_pending = None  # 饥饿提醒两段式调度的开口时刻
     pet.bubble_badges = None    # 档案徽章行（_show_stats 设置）
     pet._tag_hidden = False     # 气泡压住饱食度牌的标记
+    # ---- D 批次新增（对应 __init__）----
+    pet._yawn_amt = E.Spring(0.0, 110, 13)   # 哈欠张嘴显形度
+    pet._yawn_t0 = None
+    pet._yawns_left = 0
+    pet._yawn_next = 1e9
+    pet._hover_t0 = None        # 被盯久了（悬停不动）计时
+    pet._hover_anchor = None
+    pet._stare_cd = 0.0
+    pet._think_until = -1.0     # 思考微表情（视线被拉上去）
+    pet._feed_burst_n = 0       # 喂食连击（10s 窗口口数）
+    pet._feed_burst_t0 = -99.0
+    pet._next_bump_line = 0.0   # 撞墙台词节流
+    pet._pomo_last_said = False  # 番茄钟最后一分钟台词（每段一次）
+    pet._meta.setdefault("ach", {})
+    pet._meta.setdefault("pomo_total", 0)
+    pet._meta.setdefault("birthday", "")
     pet._pass = False
     pet._tray = None
     pet.timer = None
@@ -1077,6 +1093,270 @@ def main():
     p12._toggle_silent(True)
     check("静默开关生效（写入偏好）", p12._meta.get("silent") is True)
     check("静默开关有台词回应", len(p12.bubble_text) > 0)
+
+    # ================= 13. D 批次（设计与功能） =================
+    print("\n[13] D 批次（设计与功能）")
+    import time as _time
+
+    # ---- 13a. D1-1 打字机气泡 ----
+    print("  [13a] 打字机气泡")
+    p13 = make_pet(app)
+    p13.t = 5.0
+    p13._last_t = 5.0
+    long_txt = "这是一条比较长的台词，用来验证打字机逐字显示的效果呀。"
+    p13._say(long_txt, 9.0)
+    p13.bubble_t0 = p13.t
+    check("打字机：出生瞬间不显示（停顿期）",
+          p13._bubble_shown_text() == "")
+    p13.bubble_t0 = p13.t - 0.5
+    part = p13._bubble_shown_text()
+    check("打字机：0.5s 只显示前缀",
+          0 < len(part) < len(long_txt), "n=%d" % len(part))
+    p13.bubble_t0 = p13.t - 9.0
+    check("打字机：时间到显示全量",
+          p13._bubble_shown_text() == long_txt)
+    short = "咕噜咕噜～"
+    p13._say(short, 2.0)
+    check("打字机：短句整句弹出（不吃打字机）",
+          p13._bubble_shown_text() == short)
+    # 渲染级：部分文本的墨量少于全量
+    # 文字画在不透明气泡底上，alpha 通道不变；判据用「中间调文字像素」：
+    # 气泡底近白(255,24x,23x)，文字暖棕(163,141,123)，气泡描边两侧相同可抵消
+    p13._say(long_txt, 9.0)
+    p13.bubble_t0 = p13.t - 0.5
+    img_part = _render_layer(p13, p13._draw_bubble).convertToFormat(
+        QImage.Format_RGBA8888)
+    p13.bubble_t0 = p13.t - 9.0
+    img_full = _render_layer(p13, p13._draw_bubble).convertToFormat(
+        QImage.Format_RGBA8888)
+
+    def _ink(img):   # 中间调像素（文字+描边 AA；P0-3：先转 RGBA8888 再读通道）
+        return sum(1 for y in range(0, 472) for x in range(0, 400)
+                   if img.pixelColor(x, y).alpha() > 200
+                   and max(img.pixelColor(x, y).red(),
+                           img.pixelColor(x, y).green(),
+                           img.pixelColor(x, y).blue()) < 220)
+
+    check("打字机：部分文本渲染墨量少于全量",
+          _ink(img_full) > _ink(img_part) + 500,
+          "part=%d full=%d" % (_ink(img_part), _ink(img_full)))
+
+    # ---- 13b. D1-2 睡前哈欠铺垫 ----
+    print("  [13b] 睡前哈欠")
+    p14 = make_pet(app)
+    p14.t = 10.0
+    p14._last_t = 10.0
+    p14.last_interact = p14.t - 283.0    # 距入睡(300s)差 17s，已进提前量窗口
+    seen_yawn = 0.0
+    slept = False
+    for _ in range(int(40 / (1.0 / 30.0))):
+        p14.clock.ms += (1.0 / 30.0) * 1000.0
+        p14._tick()
+        seen_yawn = max(seen_yawn, p14._yawn_amt.v)
+        if p14.state == "sleep":
+            slept = True
+            check("哈欠：入睡发生在哈欠收尾之后",
+                  p14._yawn_t0 is None and p14._yawns_left == 0)
+            break
+    check("哈欠：睡前真的打了哈欠（显形度>0.5）", seen_yawn > 0.5,
+          "peak=%.2f" % seen_yawn)
+    check("哈欠：铺垫后正常入睡", slept)
+    p15 = make_pet(app)
+    p15.t = 10.0
+    p15._last_t = 10.0
+    p15.last_interact = p15.t - 290.0
+    run(p15, 1.0, keep_awake=False)
+    check("哈欠：铺垫线已启动",
+          p15._yawns_left > 0 or p15._yawn_t0 is not None)
+    p15._touch()
+    check("哈欠：交互打断清零",
+          p15._yawn_t0 is None and p15._yawns_left == 0
+          and p15._yawn_next == 1e9)
+
+    # ---- 13c. D1-3 成就系统 ----
+    print("  [13c] 成就系统")
+    p16 = make_pet(app)
+    p16.t = 3.0
+    p16._last_t = 3.0
+    p16._meta["first_seen"] = _time.strftime("%Y-%m-%d")  # 屏蔽 day7 连带解锁
+    p16._meta["fed"] = 50
+    check("成就：fed50 达成解锁 1 项",
+          p16._check_ach(announce=False) == 1
+          and "fed50" in p16._meta["ach"])
+    check("成就：重复结算不重复解锁",
+          p16._check_ach(announce=False) == 0)
+    p16._meta["pomo_total"] = 10
+    check("成就：pomo10 跨类解锁",
+          p16._check_ach(announce=False) == 1
+          and "pomo10" in p16._meta["ach"])
+    p17 = make_pet(app)
+    p17.t = 3.0
+    p17._last_t = 3.0
+    p17._meta["first_seen"] = _time.strftime("%Y-%m-%d")  # 屏蔽 day7 连带解锁
+    p17._meta["fed"] = 200
+    p17._meta["pets"] = 100
+    check("成就：多项同刻一起解锁",
+          p17._check_ach(announce=False) == 3)   # fed50+fed200+pat100
+    p17._show_stats()
+    check("成就：档案文案带成就计数", "成就" in p17.bubble_text,
+          repr(p17.bubble_text[-14:]))
+
+    # ---- 13d. D1-4 被盯久了 ----
+    print("  [13d] 被盯久了")
+    p18 = make_pet(app)
+    p18.t = 20.0
+    p18._last_t = 20.0
+    p18.clock.ms = 20000                 # 对齐 FakeClock，防 _tick 重算 t 覆盖
+    p18._hover_t0 = p18.t - 10.0         # 悬停不动 10s > 6s 阈值
+    run(p18, 0.1)
+    check("被盯久了：超时开口", len(p18.bubble_text) > 0,
+          repr(p18.bubble_text[:12]))
+    check("被盯久了：冷却已设置", p18._stare_cd > p18.t)
+    p19 = make_pet(app)
+    p19.t = 20.0
+    p19._last_t = 20.0
+    p19.clock.ms = 20000
+    p19._hover_t0 = None
+    run(p19, 0.1)
+    check("被盯久了：没有悬停计时就不开口", len(p19.bubble_text) == 0)
+
+    # ---- 13e. D1-5/6 使用说明与首次引导 ----
+    print("  [13e] 使用说明与引导")
+    p20 = make_pet(app)
+    p20.t = 1.0
+    p20._last_t = 1.0
+    p20._show_tips()
+    check("使用说明：第一条已说、已记档",
+          p20.bubble_text == E.DEFAULT_LINES["tips"][0]
+          and p20._meta["tips_seen"] is True)
+    check("数据目录：方法就位", callable(getattr(p20, "_open_data_dir", None)))
+    p21 = make_pet(app)
+    p21.t = 1.0
+    p21._last_t = 1.0
+    p21._meta["greet_day"] = ""
+    p21._meta["first_seen"] = _time.strftime("%Y-%m-%d")
+    p21._maybe_greet()
+    check("首次引导：相识第 1 天问候已说", len(p21.bubble_text) > 0)
+    check("首次引导：greet_day 记档",
+          p21._meta["greet_day"] == _time.strftime("%Y-%m-%d"))
+
+    # ---- 13f. D2-7 夜间降亮 ----
+    print("  [13f] 夜间降亮")
+    h_now = _time.localtime().tm_hour
+    expect_dim = 34 if (h_now >= 23 or h_now < 5) else 0
+    check("夜间降亮：随本地时段取值",
+          E.EjeePet._night_dim() == expect_dim,
+          "hour=%d dim=%d" % (h_now, E.EjeePet._night_dim()))
+
+    # ---- 13g. D2-8 生日彩蛋 ----
+    print("  [13g] 生日彩蛋")
+    p22 = make_pet(app)
+    p22.t = 1.0
+    p22._last_t = 1.0
+    p22._meta["greet_day"] = ""
+    p22._meta["birthday"] = _time.strftime("%m-%d")
+    p22._maybe_greet()
+    check("生日：当天问候换成生日台词",
+          p22.bubble_text in E.DEFAULT_LINES["birthday"])
+    check("生日：庆祝已触发", p22._celebrate_until > p22.t)
+    check("节日：彩蛋表就位（7 个）", len(E.FESTIVALS) == 7)
+
+    # ---- 13h. D2-9 微表情扩充（思考/得意） ----
+    print("  [13h] 微表情扩充")
+    p24 = make_pet(app)
+    p24.t = 2.0
+    p24._last_t = 2.0
+    p24._think_until = p24.t + 1.0
+    gx, gy, _tilt = p24._gaze_target()
+    check("思考：视线被拉上去", abs(gy + 0.9) < 1e-6 and abs(gx) < 1e-6)
+    p25 = make_pet(app)
+    p25.t = 2.0
+    p25._last_t = 2.0
+    p25.clock.ms = 2000                  # 对齐 FakeClock，防 _tick 重算 t 覆盖
+    p25._next_expr = p25.t               # 强制触发随机微表情调度
+    run(p25, 0.05)
+    fired = (p25.surprised_until > p25.t or p25._celebrate_until > p25.t
+             or p25._think_until > p25.t or p25.floats
+             or p25.particles)
+    check("微表情：四选一分支触发并重排下一次",
+          p25._next_expr > p25.t and fired)
+
+    # ---- 13i. D2-10 咀嚼回味 + 连击台词 ----
+    print("  [13i] 咀嚼回味")
+    p26 = make_pet(app)
+    p26.t = 2.0
+    p26._last_t = 2.0
+    p26.clock.ms = 2000                  # 对齐 FakeClock，防 _tick 重算 t 覆盖
+    p26.feed()
+    check("喂食：进入 bread 相位",
+          p26.phase == "bread" and p26.state == "happy")
+    p26.clock.ms += 850                  # bread 0.55s -> chew（推 clock 而非 t）
+    p26._tick()
+    check("喂食：0.55s 后进入 chew 相位", p26.phase == "chew")
+    p26.clock.ms += 250                  # 落在第一次开合中段（e=0.25，避开换相瞬间）
+    p26._tick()                          # _mouth_open 读 self.t，必须先推进
+    open_mid = p26._mouth_open()
+    check("喂食：咀嚼期嘴在开合（0<开度<0.9）",
+          0.0 < open_mid < 0.9, "op=%.2f" % open_mid)
+    p26.clock.ms += 1200                 # chew 0.9s -> idle + 台词
+    p26._tick()
+    check("喂食：咀嚼完回 idle 并说满足台词",
+          p26.phase == "idle" and len(p26.bubble_text) > 0)
+    p27 = make_pet(app)
+    p27.t = 2.0
+    p27._last_t = 2.0
+    p27.clock.ms = 2000
+    for _i in range(3):
+        p27._meta["hunger"] = 30.0       # 每口都吃得进去（<99）
+        p27._feed_burst_t0 = p27.t - 1.0  # 10s 窗口内
+        p27.feed()
+        p27.clock.ms += 700              # bread -> chew
+        p27._tick()
+        p27.clock.ms += 1200             # chew -> idle + 台词
+        p27._tick()
+    check("连击：第 3 口后计数为 3", p27._feed_burst_n == 3)
+    check("连击：说的是变体台词（feed_more 池）",
+          p27.bubble_text in E.DEFAULT_LINES["feed_more"])
+
+    # ---- 13j. D2-11 氛围飘浮物 ----
+    print("  [13j] 氛围飘浮物")
+    jf = E.JuiceOverlay(None)
+    scr = app.primaryScreen().availableGeometry()
+    jf._amb_next = 0.0                   # 强制立刻生成
+    jf.ambient_step(0.033, scr, t_now=100.0)
+    check("氛围：生成了一片飘浮物", len(jf._amb) == 1)
+    it0 = jf._amb[0]
+    x0 = it0["x"]
+    jf.ambient_step(1.0, scr, t_now=101.0)
+    moved = (jf._amb[0]["x"] - x0) if jf._amb else 0.0
+    check("氛围：随时间横移", moved * it0["vx"] > 0,
+          "dx=%.1f vx=%.1f" % (moved, it0["vx"]))
+    it_far = dict(it0, x=float(scr.right() + 30), vx=-5000.0,
+                  exit=float(scr.left() - 40))
+    jf._amb = [it_far]
+    jf._amb_next = 1e9
+    jf.ambient_step(1.0, scr, t_now=102.0)
+    check("氛围：越界回收", len(jf._amb) == 0)
+    jf.hide()
+    jf.deleteLater()
+
+    # ---- 13k. D2-12 台词池与番茄最后一分钟 ----
+    print("  [13k] 台词池")
+    for key in ("stare", "stare_night", "birthday", "tips", "bump",
+                "zoom_big", "zoom_small", "pomo_last", "feed_more", "ach"):
+        if key != "ach":
+            check("台词池 %s 就位" % key,
+                  len(E.DEFAULT_LINES.get(key, [])) > 0)
+    p30 = make_pet(app)
+    p30.t = 5.0
+    p30._last_t = 5.0
+    p30._pomo_end = p30.t + 30.0         # 已在最后一分钟
+    run(p30, 0.1)
+    check("番茄：最后一分钟加油台词（每段一次）",
+          p30._pomo_last_said and len(p30.bubble_text) > 0)
+    p30.bubble_text = ""
+    run(p30, 0.1)
+    check("番茄：同段不重复说", p30.bubble_text == "")
 
     print("\n" + "=" * 52)
     if FAILED:

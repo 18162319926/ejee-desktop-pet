@@ -18,6 +18,7 @@
 依赖：PySide6（与 ejee_pet.py 同一环境）。
 """
 import os
+import re
 import sys
 import subprocess
 
@@ -101,6 +102,20 @@ def main():
                   if f.startswith("preview_") and f.endswith(".png"))
     if not files:
         sys.exit("基线目录 _baseline/ 为空，首次请加 --refresh 生成基线")
+
+    # 交叉校验：基线里的每一帧都必须是 --shot 能重新生成的（ejee_pet.py
+    # shot 段的字面量文件名）。2026-10-24 教训：_baseline/ 曾混入一张临时
+    # 脚本手工渲染的 preview_swim.png，--shot 永远不生成它，于是每轮回归都
+    # 拿 previews/ 里的陈年残留文件"假一致"，删过程图时才暴露。
+    src = open(os.path.join(APP_DIR, "ejee_pet.py"),
+               encoding="utf-8").read()
+    shot_frames = set(re.findall(r'"(preview_[a-z_]+\.png)"', src))
+    if len(shot_frames) >= 10:                 # 解析明显成功才拦
+        stale = [f for f in files if f not in shot_frames]
+        if stale:
+            sys.exit("基线含非 --shot 产物：%s\n这些帧 ejee_pet.py 的 shot 段"
+                     "不会重新生成，比对失去意义——请从 _baseline/ 移除。"
+                     % ", ".join(stale))
 
     print("文件            状态    差异像素   差异包围盒(x0,y0-x1,y1)")
     print("-" * 64)

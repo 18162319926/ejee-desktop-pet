@@ -23,6 +23,8 @@ tools/*
 !tools/check_preview.py
 # 例外：Git Data API 备用推送通道（代理拦 443 时兜底），必须入库
 !tools/push_via_api.py
+# 例外：未定义名静态检查（每轮验证流程第 0 步：拆文件丢 import 防线），必须入库
+!tools/undef_check.py
 # 各状态预览图（--shot 生成）与回归基准，仅本地参考
 previews/
 _baseline/

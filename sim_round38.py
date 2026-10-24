@@ -11,9 +11,9 @@ import math
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("QT_QPA_FONTDIR", "C:/Windows/Fonts")
 
-from PySide6.QtCore import Qt, QPoint, QPointF          # noqa: E402
+from PySide6.QtCore import Qt, QPoint, QPointF, QEvent    # noqa: E402
 from PySide6.QtWidgets import QApplication              # noqa: E402
-from PySide6.QtGui import QCursor                       # noqa: E402
+from PySide6.QtGui import QCursor, QMouseEvent          # noqa: E402
 
 sys.argv = [sys.argv[0]]
 import ejee_pet as E                                    # noqa: E402
@@ -1413,6 +1413,107 @@ def main():
           g2.right() <= ag.right() and g2.left() >= ag.left()
           and g2.bottom() <= ag.bottom() and g2.top() >= ag.top(),
           "geo=%s" % (g2,))
+
+    # ---- 13m. BreadCursor 冒烟：_poll 全链路（防拆文件再丢 import）----
+    print("  [13m] BreadCursor 冒烟")
+    from ejee_ui import BreadCursor as _BC
+    _bc = _BC()
+    try:
+        # QCursor.pos() -> move() -> _down()：任何一环 import 缺失都会炸
+        # （2026-10-23 实测：QCursor 漏导入 -> _poll 每 16ms NameError，
+        #   面包冻在初次 show 位置不动，exe 无控制台连错都看不到）
+        _bc._poll()
+        _ok, _err = True, ""
+    except NameError as e:
+        _ok, _err = False, repr(e)
+    finally:
+        _bc.stop()
+    check("面包光标：_poll 全链路可跑（import 齐全）", _ok, _err)
+
+    # ---- 13n. 米色喂食热区（用户裁决：精准设定点击喂食的区域为米色区域）----
+    print("  [13n] 米色喂食热区")
+    p34 = make_pet(app)
+    p34.t = 5.0
+    p34._last_t = 5.0
+    p34.facing = 1
+    p34._load_assets()               # 掩膜从底图构建，需要真实素材
+    # 米色区内 -> feed（鼻子/嘴下/下巴/左右缘）
+    for (zx, zy), desc in [((178, 255), "鼻子"), ((178, 270), "嘴下"),
+                           ((178, 305), "下巴"), ((105, 295), "米色左缘"),
+                           ((250, 295), "米色右缘")]:
+        check("热区：%s -> feed" % desc,
+              p34._click_zone_at(zx, zy) == "feed")
+    # 眼线以上 -> head（含眼睛上方的浅色楔形：归摸头，不归喂食）
+    for (zx, zy), desc in [((195, 200), "额头"), ((150, 210), "眼上楔形")]:
+        check("热区：%s -> head" % desc,
+              p34._click_zone_at(zx, zy) == "head")
+    # 橙色身体 / 身外空白 -> None（不喂：热区精准到米色像素）
+    for (zx, zy), desc in [((120, 250), "左侧橙身"), ((280, 260), "右侧橙身"),
+                           ((195, 340), "身下空白"), ((380, 420), "画布右下")]:
+        check("热区：%s -> None（不喂）" % desc,
+              p34._click_zone_at(zx, zy) is None)
+    # 尾巴胶囊判定不变（优先级最高）
+    check("热区：尾巴胶囊仍优先", p34._click_zone_at(323, 250) == "tail")
+
+    # 空掩膜兜底：底图缺失时（曾实测 318ms 白跑 + 热区清零且无感知），
+    # 喂食热区退化为嘴周椭圆，功能不静默失效
+    import ejee_pet as _EP
+    _sv_mask = _EP.EjeePet._BEIGE_MASK
+    _sv_empty = _EP.EjeePet._BEIGE_EMPTY
+    _sv_res = _EP.res_path
+    try:
+        _EP.res_path = lambda name: "Z:/__nope__/" + name
+        _EP.EjeePet._BEIGE_MASK = None
+        _EP.EjeePet._BEIGE_EMPTY = False
+        check("热区：底图缺失 -> 空掩膜兜底标志置位",
+              p34._ensure_beige() is True)
+        check("热区：兜底仍认嘴周（椭圆内 -> feed）",
+              p34._click_zone_at(178, 270) == "feed")
+        check("热区：兜底不认眼线以上（head 优先）",
+              p34._click_zone_at(178, 180) == "head")
+        check("热区：兜底不认身外远处（None）",
+              p34._click_zone_at(60, 270) is None)
+    finally:
+        _EP.EjeePet._BEIGE_MASK = _sv_mask
+        _EP.EjeePet._BEIGE_EMPTY = _sv_empty
+        _EP.res_path = _sv_res
+
+    # 事件入口：窗口坐标必须扣 PAD_T（2026-10-23 修的存量 bug——
+    # 原先漏扣，整套分区上移 72 设计 px，喂食区把半张窗户都算进去）
+    def _ev(wx, wy):
+        return QMouseEvent(QEvent.MouseButtonRelease, QPointF(wx, wy),
+                           QPointF(wx, wy), Qt.LeftButton, Qt.LeftButton,
+                           Qt.NoModifier)
+
+    check("事件入口：窗口 y 扣 PAD_T（342=设计270）-> feed",
+          p34._click_zone(_ev(178, 342)) == "feed")
+    check("事件入口：窗口 252=设计180 归摸头",
+          p34._click_zone(_ev(178, 252)) == "head")
+    check("事件入口：窗口 387=设计315 无区域",
+          p34._click_zone(_ev(178, 387)) is None)
+    check("事件入口：窗口 322=设计250 是尾巴",
+          p34._click_zone(_ev(323, 322)) == "tail")
+    # 朝左镜像：点击坐标绕 BCX 镜像后再查掩膜
+    p34.facing = -1
+    check("镜像：窗口 285,367（=规范105,295）-> feed",
+          p34._click_zone(_ev(285, 367)) == "feed")
+    check("镜像：窗口 105,367（=规范285,295）-> None",
+          p34._click_zone(_ev(105, 367)) is None)
+    p34.facing = 1
+    check("不镜像时同点落在米色左缘", p34._click_zone(_ev(105, 367)) == "feed")
+    # 掩膜规模 sanity：米色热区约 4% 画布，纵向落在角色带内，
+    # 类级缓存复用（第二次访问不重建）
+    m = E.EjeePet._BEIGE_MASK
+    n = sum(m)
+    check("掩膜：规模合理（2000..12000 px）", 2000 < n < 12000, "n=%d" % n)
+    ys = [i // 400 for i in range(len(m)) if m[i]]
+    check("掩膜：纵向落在眼线以下的角色带内",
+          235 <= min(ys) <= 245 and 305 <= max(ys) <= 318,
+          "y %d..%d" % (min(ys), max(ys)))
+    check("掩膜：类级缓存复用", E.EjeePet._BEIGE_MASK is m)
+    check("掩膜：嘴心/下巴在热区内、身侧不在",
+          m[270 * 400 + 178] and m[305 * 400 + 178]
+          and not m[250 * 400 + 120])
 
     print("\n" + "=" * 52)
     if FAILED:

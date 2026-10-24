@@ -165,7 +165,7 @@ EJEE（伊吉）桌面宠物 —— 功能说明
     EjeePet._draw_*            分块绘制：body / eyes / mouth / fantasy / foreground
     EjeePet._tick              唯一的时间推进（情绪、物理、粒子、散步、番茄钟）
     EjeePet._decide_state      状态优先级仲裁
-    EjeePet._click_zone        点击热区（尾巴胶囊 / 头部 / 身体）
+    EjeePet._click_zone        点击热区（尾巴胶囊 / 米色喂食区 / 头部）
     EjeePet.feed / _take_bread 喂食（含"吃撑"判定）与拖拽投喂
 """
 import json
@@ -609,6 +609,8 @@ class EjeePet(EjeePaintMixin, QWidget):
     # ---------- 布局常量（设计坐标） ----------
     CHAR_W = 292.0
     BCX, BCY = 195.0, 318.0          # 底图底部中心锚点
+    _BEIGE_MASK = None               # 米色喂食热区掩膜（类级缓存，见 _beige_hit）
+    _BEIGE_EMPTY = False             # 底图缺失 -> 空掩膜 -> 几何兜底标志
 
     def __init__(self):
         super().__init__()
@@ -1390,6 +1392,14 @@ class EjeePet(EjeePaintMixin, QWidget):
                       er["w"] * self.s, er["h"] * self.s),
         }
         self.head_top = self.BCY - self.bh           # 头顶（含叶）设计 y
+
+        # 米色喂食热区掩膜启动预热：首次构建 ~55ms（68k 像素判定），
+        # 挪到事件循环空闲期，别让用户的第一次点击喂食等它
+        QTimer.singleShot(0, self._warm_beige)
+
+    def _warm_beige(self):
+        """预热米色掩膜（_ensure_beige 幂等；类级缓存，重复调用秒返）。"""
+        self._ensure_beige()
 
     # ================= 状态机 =================
     def _set_state(self, name):
@@ -2710,13 +2720,23 @@ class EjeePet(EjeePaintMixin, QWidget):
             self._shake_log.append((self.t, sdir))
 
     def _click_zone(self, e):
-        """点击落点分区（视觉设计坐标）：tail 尾巴 / head 头部（含眼区上方）
-        / body 身体。eye_pos 是设计坐标；朝左时 x 轴镜像。"""
+        """事件入口：窗口坐标 -> 设计坐标后分区。
+        2026-10-23 修：原先漏扣 PAD_T，整套分区（摸头/喂食/尾巴）整体
+        上移 72 设计 px——喂食区把眼睛以下的半张窗户（含身外空白）
+        都算进去，摸头区只剩头顶一小条。paintEvent 是
+        scale 后 translate(0, PAD_T)，故窗口 y/scale 必须再减 PAD_T。"""
         scale = self.width() / DW
         dx = e.position().x() / scale
         if self.facing == -1:
             dx = 2.0 * self.BCX - dx      # 绕身体中轴镜像（非窗口中线）
-        dy = e.position().y() / scale
+        return self._click_zone_at(dx, e.position().y() / scale - PAD_T)
+
+    def _click_zone_at(self, dx, dy):
+        """点击落点分区（视觉设计坐标，朝左镜像后的规范帧）：
+        tail 尾巴 / feed 米色喂食区 / head 头部（眼线以上）/ None 无。
+        喂食热区 = 底图米色（muzzle）像素掩膜，只认眼线以下——
+        2026-10-23 用户裁决：精准设定点击喂食的区域为米色区域
+        （原来是"眼睛以下整块都喂"，身外空白和橙色身体都算）。"""
         # 尾巴判定优先：橘子尾巴是右侧竖长瓣（实测设计 x≈300..347、
         # y≈172..318，上半段与身体融合、下半段可摆），用"到竖线段距离"
         # 的胶囊判定覆盖整条尾巴，比椭圆更贴合这个竖长形状
@@ -2726,7 +2746,86 @@ class EjeePet(EjeePaintMixin, QWidget):
         eye_y = min(self.eye_pos["eye_l"][1], self.eye_pos["eye_r"][1])
         if dy < eye_y:
             return "head"
-        return "body"
+        if self._beige_hit(dx, dy):
+            return "feed"
+        return None
+
+    # ---- 米色喂食热区（像素级掩膜）----
+    def _ensure_beige(self):
+        """掩膜首次构建并类级缓存；返回 True 表示走了几何兜底
+        （底图缺失 -> 空掩膜）。构建 ~55ms，由 _warm_beige 在启动
+        空闲期预热，用户的第一次点击不必等它。"""
+        if EjeePet._BEIGE_MASK is None:
+            EjeePet._BEIGE_MASK = self._build_beige_mask()
+            EjeePet._BEIGE_EMPTY = not any(EjeePet._BEIGE_MASK)
+            if EjeePet._BEIGE_EMPTY:
+                print("[EJEE] base_body.png 不可用：喂食热区回退几何判定",
+                      file=sys.stderr)
+        return EjeePet._BEIGE_EMPTY
+
+    def _beige_fallback(self, dx, dy):
+        """空掩兜底：眼线以下、嘴周一带的椭圆（不精准，但保证
+        「点击喂食」不会因一张图缺失而静默失效）。"""
+        if dy < min(self.eye_pos["eye_l"][1], self.eye_pos["eye_r"][1]):
+            return False
+        return math.hypot((dx - self.BCX) / 100.0,
+                          (dy - (self.BCY - 60.0)) / 72.0) <= 1.0
+
+    def _beige_hit(self, dx, dy):
+        """设计坐标 (dx,dy) 是否落在米色（muzzle）像素上。
+        掩膜首次使用时构建并类级缓存（底图相同，全进程共用一份）。"""
+        if self._ensure_beige():
+            return self._beige_fallback(dx, dy)
+        ix, iy = int(dx), int(dy)
+        if 0 <= ix < DW and 0 <= iy < DH:
+            return EjeePet._BEIGE_MASK[iy * int(DW) + ix] != 0
+        return False
+
+    def _build_beige_mask(self):
+        """米色（muzzle）像素掩膜：底图缩放到设计尺寸（292x233，即屏幕
+        1:1 显示的那份）逐像素判定——比身体橙 (250,150,50) 更浅更淡
+        （g/r>0.66 且 b/r>0.30）算米色；只保留眼线以下行（以上归摸头，
+        头顶浅斑/眼睛上方楔形/尾巴奶油点都不算喂食热区）。
+        判定口径来自 2026-10-23 实测：鼻周 (227,168,100) vs 额头
+        (254,158,66)，两组比值分界干净。"""
+        img = QImage(res_path("base_body.png"))
+        if img.isNull():
+            # 底图缺失/损坏：返回空掩膜，_beige_hit 会走几何兜底
+            # （曾实测：缺图时逐点 pixel() 白跑 318ms 且热区清零无感知）
+            return bytearray(int(DW * DH))
+        w = int(self.CHAR_W)
+        h = int(round(self.bh))
+        small = img.convertToFormat(QImage.Format_RGBA8888).scaled(
+            w, h, Qt.IgnoreAspectRatio,
+            Qt.SmoothTransformation).convertToFormat(
+                QImage.Format_RGBA8888)
+        ox = int(self.BCX - w / 2)          # 底图左缘 -> 设计 x=49
+        oy = int(self.BCY - h)              # 底图顶缘 -> 设计 y=85
+        eye_y = int(min(self.eye_pos["eye_l"][1],
+                        self.eye_pos["eye_r"][1]))
+        mask = bytearray(int(DW * DH))
+        # bits() 拿 memoryview 直读 RGBA8888 连续字节（stride 可能有行对齐），
+        # 比逐点 small.pixel() 少一层 QRgb 打包；注意 QImage 必须保持存活
+        stride = small.bytesPerLine()
+        buf = small.bits()
+        for py in range(h):
+            dy = oy + py
+            if dy < eye_y:             # 眼线以上归摸头，不进热区
+                continue
+            row = dy * int(DW) + ox
+            line = buf[py * stride: py * stride + w * 4]
+            for px in range(w):
+                o = px * 4
+                if line[o + 3] < 200:      # alpha
+                    continue
+                r = line[o]
+                g = line[o + 1]
+                b = line[o + 2]
+                # 米色 = 暖色 + 比身体橙更淡（整数比值，等价 g/r>.66 b/r>.30）
+                if (r > 175 and g > 120 and b > 60
+                        and g * 3 > r * 2 and b * 10 > r * 3):
+                    mask[row + px] = 1
+        return mask
 
     def mouseReleaseEvent(self, e):
         if e.button() == Qt.LeftButton and self._press_pos is not None:
@@ -2739,10 +2838,11 @@ class EjeePet(EjeePaintMixin, QWidget):
                         self._mischief()
                     elif zone == "head":
                         self._pat()
-                    else:
+                    elif zone == "feed":
                         self._feed_pending = True
                         self._feed_deadline = self.t + 2.0
                         QTimer.singleShot(280, self._do_feed)
+                    # None（身外空白/橙色身体）：不喂，精准热区
             else:
                 v = math.hypot(self._dvx, self._dvy)
                 if v > 80:                   # 松手惯性甩动

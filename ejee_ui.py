@@ -14,7 +14,7 @@ import time
 
 from PySide6.QtCore import Qt, QTimer, QPointF, QRectF, QPoint, Signal
 from PySide6.QtGui import (QPainter, QColor, QPen, QBrush, QPainterPath,
-                           QIcon, QPixmap, QLinearGradient)
+                           QIcon, QPixmap, QLinearGradient, QCursor)
 from PySide6.QtWidgets import (QApplication, QWidget, QMenu, QDialog,
                                QLabel, QPushButton, QVBoxLayout, QHBoxLayout,
                                QComboBox)

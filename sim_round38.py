@@ -595,12 +595,46 @@ def main():
 
     # ---------- 8. 饱食度规则回归（不能被本轮改坏）----------
     print("\n[8] 喂食规则回归")
-    for h0 in (65.0, 70.0, 80.0, 98.0):
+    for h0 in (80.0, 98.0):
         p2 = make_pet(app)
         p2._meta["hunger"] = h0
         p2.feed()
         check("饱食 %d -> 喂后 100" % h0, p2._meta["hunger"] == 100.0,
               "-> %g" % p2._meta["hunger"])
+    p2 = make_pet(app)
+    p2._meta["hunger"] = 65.0
+    p2.feed()
+    check("饱食 65 -> 喂后 85（每口 +20，不满杯）",
+          p2._meta["hunger"] == 85.0, "-> %g" % p2._meta["hunger"])
+    # 衰减模型回归：100→0 全程恰为 HUNGER_FULL_SECONDS（4 小时），
+    # 且越低掉得越快（100→50 比 50→0 耗时更长）
+    T = E.HUNGER_FULL_SECONDS
+    check("总时长 = 4 小时", T == 4 * 3600.0, "T=%g" % T)
+
+    def _seg_time(s_from, s_to):
+        lo, hi = 0.0, T
+        for _ in range(60):
+            mid = (lo + hi) / 2
+            if E.EjeePet._hunger_after(s_from, mid) > s_to:
+                lo = mid
+            else:
+                hi = mid
+        return (lo + hi) / 2
+
+    s_end = E.EjeePet._hunger_after(100.0, T)
+    check("100 -> 4h 后归零", abs(s_end) < 1e-6, "-> %g" % s_end)
+    t1 = _seg_time(100.0, 50.0)
+    t2 = _seg_time(50.0, 0.0)
+    check("100→50 比 50→0 慢（越低掉得越快）", t1 > t2 * 1.5,
+          "t1=%.0fs t2=%.0fs" % (t1, t2))
+    check("两段合计恰为总时长", abs(t1 + t2 - T) < 1.0,
+          "%.2fs vs %g" % (t1 + t2, T))
+    check("离线补扣同模型（低饱食掉得快：20 -> 10 分钟剩 ~13.3）",
+          13.0 < E.EjeePet._hunger_after(20.0, 600.0) < 13.6,
+          "-> %g" % E.EjeePet._hunger_after(20.0, 600.0))
+    check("高饱食掉得慢（80 -> 10 分钟只掉 ~3.2）",
+          76.5 < E.EjeePet._hunger_after(80.0, 600.0) < 77.2,
+          "-> %g" % E.EjeePet._hunger_after(80.0, 600.0))
 
     # ---------- 9. R44：陪伴档案 / 穿透滚轮缩放 / 位置记忆 / 开机自启 ----------
     print("\n[9] R44：陪伴档案 / 穿透缩放 / 位置记忆 / 自启")

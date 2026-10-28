@@ -116,13 +116,15 @@ EJEE（伊吉）桌面宠物 —— 功能说明
     该钩子同时接管 Shift+滚轮缩放（光标压在宠物身上 + 按住 Shift 滚轮），
     穿透状态下也能调整大小。
 
-七、自由散步
-    沿屏幕四周「边框带」环行（窗沿距屏幕边 26~150px）：预生成整圈密集航点，
-    结构上不可能横穿屏幕中央；每段走 600~1400px 后到站张望、休息 25~50s；
+七、自由散步（2026-10-28 用户裁决：活动范围限定在当前所在角落）
+    活动框 = 宠物**当前所在那个屏幕角**的象限（约半屏×半屏，以角色可见区
+    中心判角，拖到别的角就换框）。沿活动框四周「边框带」环行（角色可见
+    边缘距框边 26~150px）：预生成整圈密集航点，结构上不可能越角、也不
+    横穿框中央；每段走 600~1400px 后到站张望、休息 25~50s；
     朝向按移动方向自动镜像（原图头朝左，向右走时整体水平翻转）。
     游动姿态：停着时只有呼吸，走起来叠加「一拱一拱」的浮沉（相位按走过的
-    距离推进，尾巴摆得更欢），转弯时身体顺着转向倾斜；恶作剧后还会沿边
-    迅速溜走一小段。
+    距离推进，尾巴摆得更欢），转弯时身体顺着转向倾斜；恶作剧后还会沿框边
+    迅速溜走一小段；松手甩动的惯性也只在框内反弹。
 
 八、资源与存档（源码运行为脚本同级的 assets/ 目录；打包后与 exe 同目录）
     assets/base.png        底图（ω 洞与嘴角已修补干净）
@@ -388,8 +390,8 @@ HUNGER_R100 = 100.0 * math.log(4.0) / (3.0 * HUNGER_FULL_SECONDS)
 HUNGER_R0 = 4.0 * HUNGER_R100                          # 空肚时掉得最快
 HUNGER_C = (HUNGER_R0 - HUNGER_R100) / 100.0
 
-SIZES = [("小", 0.8), ("中", 1.0), ("大", 1.25), ("特大", 1.5)]
-SIZE_MIN, SIZE_MAX = 0.5, 3.0   # Shift+滚轮缩放范围（底图原生 1548px，3x 仍不超采样）
+SIZES = [("迷你", 0.45), ("小", 0.8), ("中", 1.0), ("大", 1.25), ("特大", 1.5)]
+SIZE_MIN, SIZE_MAX = 0.3, 3.0   # Shift+滚轮缩放范围（2026-10-28 用户裁决：下限 0.5→0.3）
 # --shot 预览模式：冻结"跟随鼠标"的视线，让预览图每次渲染完全一致
 # （否则光标位置会带动身体摇摆/眼睛方向，改一行代码前后的截图没法比对）
 PREVIEW_MODE = False
@@ -410,14 +412,14 @@ POST_IDLE_SECS = 5.0
 USER_STATES = ("mischief", "dizzy", "shy", "sleep")
 # 待机自发行为的间隔（比早期版本整体放慢，让"静态待机"更安静）
 IDLE_EXPR_EVERY = (30.0, 60.0)      # 随机微表情（惊讶/庆祝）
-IDLE_WALK_EVERY = (60.0, 110.0)     # 屏幕边框散步
+IDLE_WALK_EVERY = (60.0, 110.0)     # 活动框边框散步（当前所在角落）
 IDLE_CHATTER_EVERY = (240.0, 480.0)  # 自言自语一句
 # ---- D 批次新增 ----
 YAWN_LEAD = 25.0                 # 睡前提前量：距入睡不足该秒数开始打哈欠
 YAWN_LEAD_NIGHT = 18.0           # 深夜（23-5 点）入睡阈值只有 90s，提前量缩短
 STARE_AFTER = 6.0                # 鼠标悬停不动多少秒后"被盯久了"开口
 STARE_CD = 25.0                  # 被盯久了台词冷却（说过会重新计时，不连环轰炸）
-ZOOM_BIG, ZOOM_SMALL = 2.2, 0.7  # 缩放极值专属台词阈值（Shift+滚轮范围 0.5~3.0）
+ZOOM_BIG, ZOOM_SMALL = 2.2, 0.7  # 缩放极值专属台词阈值（Shift+滚轮范围 0.3~3.0）
 
 # 成就里程碑：键 -> (成就名, 达成台词)。达成日期记录在 _meta["ach"][键]，
 # 每项只庆祝一次；档案气泡汇报"已解锁 x/N 个"。
@@ -609,6 +611,11 @@ class EjeePet(EjeePaintMixin, QWidget):
     # ---------- 布局常量（设计坐标） ----------
     CHAR_W = 292.0
     BCX, BCY = 195.0, 318.0          # 底图底部中心锚点
+    # 角色可见区在设计坐标里的包围盒（x49..341 / y85..318，含身高 233）；
+    # 活动框与散步环带都以这块"看得见的身体"为基准，而不是整张 400×472 画布——
+    # 画布上下还有一大截透明留白，拿它算会让宠物实际活动区域被严重缩水。
+    CHAR_X0, CHAR_X1 = 49.0, 341.0
+    CHAR_Y0, CHAR_Y1 = 85.0, 318.0
     _BEIGE_MASK = None               # 米色喂食热区掩膜（类级缓存，见 _beige_hit）
     _BEIGE_EMPTY = False             # 底图缺失 -> 空掩膜 -> 几何兜底标志
 
@@ -1015,24 +1022,23 @@ class EjeePet(EjeePaintMixin, QWidget):
         self._check_ach()               # pat100/pat500 在这里结算
 
     def _start_shy(self):
-        """傲娇躲避：被连摸 5 下，直接闪现到屏幕另一侧（不做身体形变 /
-        小碎步），甩出傲娇台词 + 头顶小蒸汽，3 秒后回 idle。"""
+        """傲娇躲避：被连摸 5 下，直接闪现到**同一个活动框**的另一侧（不跨角，
+        免得跑到别的象限；不做身体形变 / 小碎步），甩出傲娇台词 + 头顶
+        小蒸汽，3 秒后回 idle。"""
         self._touch()
         self._shy_until = self.t + 3.0
         self._wander = None                  # 别一边躲一边散步
         self._next_walk = self.t + random.uniform(*IDLE_WALK_EVERY)
-        # 直接闪现：从当前位置反射到屏幕对侧（环带内），落点带随机扰动
-        g = self._scr_rect()
+        # 直接闪现：在同一个活动框里反射到对侧，落点带随机扰动
+        box = self._home_box()
+        x_lo, x_hi, y_lo, y_hi = self._ring_bounds()
         w, h = self.width(), self.height()
-        ocx = self.x() + w / 2.0
-        if ocx < g.center().x():
-            nx = g.right() - w - BAND_NEAR
-        else:
-            nx = g.left() + BAND_NEAR
-        nx = clamp(nx + random.uniform(-50, 50), g.left() + BAND_NEAR,
-                   g.right() - w - BAND_NEAR)
-        ny = clamp(self.y() + random.uniform(-90, 90), g.top() + BAND_NEAR,
-                   g.bottom() - h - BAND_NEAR)
+        ox, _oy, cw, _ch = self._char_box()
+        ocx = self.x() + ox + cw / 2.0
+        core_cx = box.center().x()
+        nx = x_hi if ocx < core_cx else x_lo
+        nx = clamp(nx + random.uniform(-50, 50), x_lo, x_hi)
+        ny = clamp(self.y() + random.uniform(-90, 90), y_lo, y_hi)
         self._teleport_flash(ocx, self.y() + h / 2.0, nx + w / 2.0, ny + h / 2.0)
         self._sq.kick(-1.6)
         self._say(self._line("shy"), 2.6)
@@ -1074,12 +1080,13 @@ class EjeePet(EjeePaintMixin, QWidget):
             pt.vy = random.uniform(-30, -12)
 
     def _start_flee(self):
-        """恶作剧后逃跑：顺着当前贴着的那条屏幕边溜 130px，不横穿屏幕。"""
-        g = self._scr_rect()
-        w, h = self.width(), self.height()
-        cx, cy = self.x() + w / 2.0, self.y() + h / 2.0
-        d_l, d_r = cx - g.left(), g.right() - cx
-        d_t, d_b = cy - g.top(), g.bottom() - cy
+        """恶作剧后逃跑：顺着当前贴着的那条**活动框**边溜 130px，
+        不横穿框、不进别的象限。"""
+        box = self._home_box()
+        ox, oy, cw, ch = self._char_box()
+        cx, cy = self.x() + ox + cw / 2.0, self.y() + oy + ch / 2.0
+        d_l, d_r = cx - box.left(), box.right() - cx
+        d_t, d_b = cy - box.top(), box.bottom() - cy
         if min(d_l, d_r) < min(d_t, d_b):        # 贴左右边 -> 竖直溜
             dx, dy = 0.0, (1.0 if d_b >= d_t else -1.0)
         else:                                    # 贴上下边 -> 水平溜
@@ -1142,22 +1149,64 @@ class EjeePet(EjeePaintMixin, QWidget):
             scr = QApplication.primaryScreen()
         return scr.availableGeometry()
 
-    def _ring_pts(self):
-        """生成一环散步路径点（窗口左上角坐标）：沿屏幕四周边框带走一圈，
-        点距约 RING_STEP；深度（窗沿距屏幕边）按环周长正弦缓摆于
-        [BAND_NEAR, BAND_FAR-8]，路径圆润自然，且整体不进屏幕中央。"""
+    def _char_box(self):
+        """角色可见区在「窗口左上角坐标系」里的矩形：(ox, oy, cw, ch)。
+        设计坐标 x49..341 / y85..318，按当前缩放换算成屏幕像素；oy 另加
+        PAD_T（paintEvent 统一下移的 72px）。活动框/环带都按这块看得见的
+        身体算——整张画布上下还有大截透明留白，拿它算会把活动区严重缩水。"""
+        s = self.size
+        return (self.CHAR_X0 * s, (self.CHAR_Y0 + PAD_T) * s,
+                (self.CHAR_X1 - self.CHAR_X0) * s,
+                (self.CHAR_Y1 - self.CHAR_Y0) * s)
+
+    def _home_box(self):
+        """活动框（屏幕坐标）：宠物**当前所在那个屏幕角**的象限，约半屏×半屏。
+        以角色可见区中心判角，所以拖到别的角就自动换框；象限装不下角色
+        （超大缩放 / 极小的屏）时该轴退回整屏——宁可外扩，也不让活动范围
+        退化成一个点。2026-10-28 用户裁决：活动范围限定在当前角落。"""
         g = self._scr_rect()
-        # 底部那块透明余量不算：散步时宠物脚底才真的贴着屏幕边走
-        w, h = self.width(), self.height() - self._win_pad_b()
-        L, T, R, B = g.left(), g.top(), g.right(), g.bottom()
-        x0, y0 = L + BAND_NEAR, T + BAND_NEAR
-        x1, y1 = R - w - BAND_NEAR, B - h - BAND_NEAR
-        if x1 < x0:                       # 窄屏兜底：水平居中成竖线
-            x0 = x1 = (L + R - w) / 2.0
-        if y1 < y0:                       # 矮屏兜底：垂直居中成横线
-            y0 = y1 = (T + B - h) / 2.0
-        per = 2.0 * ((x1 - x0) + (y1 - y0))
-        if per < 120.0:                   # 屏比窗还小：无可走环
+        ox, oy, cw, ch = self._char_box()
+        ccx = self.x() + ox + cw / 2.0
+        ccy = self.y() + oy + ch / 2.0
+        gx, gy = g.center().x(), g.center().y()
+        L, R = (g.left(), gx) if ccx < gx else (gx, g.right())
+        T, B = (g.top(), gy) if ccy < gy else (gy, g.bottom())
+        if R - L < cw + 2.0 * BAND_NEAR:
+            L, R = g.left(), g.right()
+        if B - T < ch + 2.0 * BAND_NEAR:
+            T, B = g.top(), g.bottom()
+        return QRectF(float(L), float(T), float(R - L), float(B - T))
+
+    def _ring_bounds(self):
+        """窗口左上角的可走范围 (x_lo, x_hi, y_lo, y_hi)，两点同时满足：
+        ① 角色可见区完整留在活动框内、距框边 ≥ BAND_NEAR（不越角）；
+        ② 整窗不出屏（沿用 2026-10-22 裁决，边距 12px）。
+        两者取交集；交集为空（极小屏/超大缩放）就收敛成一条线，绝不
+        返回反向区间——否则寻路会盯着一个永远到不了的点原地打转。"""
+        box = self._home_box()
+        scr = self._scr_rect()
+        ox, oy, cw, ch = self._char_box()
+        m = 12.0
+        x_lo = max(box.left() + BAND_NEAR - ox, scr.left() + m)
+        x_hi = min(box.right() - BAND_NEAR - cw - ox,
+                   scr.right() - self.width() - m)
+        y_lo = max(box.top() + BAND_NEAR - oy, scr.top() + m)
+        y_hi = min(box.bottom() - BAND_NEAR - ch - oy,
+                   scr.bottom() - self.height() - m)
+        if x_hi < x_lo:
+            x_lo = x_hi = (x_lo + x_hi) / 2.0
+        if y_hi < y_lo:
+            y_lo = y_hi = (y_lo + y_hi) / 2.0
+        return x_lo, x_hi, y_lo, y_hi
+
+    def _ring_pts(self):
+        """生成一环散步路径点（窗口左上角坐标）：沿**活动框**（当前所在
+        屏幕角，约半屏×半屏）的四边框走一圈，点距约 RING_STEP；深度
+        （角色边缘距框边）按环周长正弦缓摆于 [BAND_NEAR, BAND_FAR-8]，
+        路径圆润自然，且整体不进框中央。"""
+        x_lo, x_hi, y_lo, y_hi = self._ring_bounds()
+        per = 2.0 * ((x_hi - x_lo) + (y_hi - y_lo))
+        if per < 120.0:                   # 框小到走不动一圈：不散步
             return []
         lo, hi = BAND_NEAR, BAND_FAR - 8.0
         mid, amp = (lo + hi) / 2.0, (hi - lo) / 2.0
@@ -1166,61 +1215,67 @@ class EjeePet(EjeePaintMixin, QWidget):
             return mid + amp * math.sin(s / per * math.tau * 2.0
                                         + self._ring_phase)
 
+        def ty(d):                        # 顶边：往下深入
+            return clamp(y_lo + (d - BAND_NEAR), y_lo, y_hi)
+
+        def by_(d):                       # 底边：往上深入
+            return clamp(y_hi - (d - BAND_NEAR), y_lo, y_hi)
+
+        def lx(d):                        # 左边：往右深入
+            return clamp(x_lo + (d - BAND_NEAR), x_lo, x_hi)
+
+        def rx(d):                        # 右边：往左深入
+            return clamp(x_hi - (d - BAND_NEAR), x_lo, x_hi)
+
         pts, s = [], 0.0
-        n = max(2, int((x1 - x0) / RING_STEP) + 2)      # 顶边 左→右
+        n = max(2, int((x_hi - x_lo) / RING_STEP) + 2)      # 顶边 左→右
         for i in range(n):
             f = i / (n - 1)
-            pts.append((x0 + (x1 - x0) * f, T + depth(s)))
+            pts.append((x_lo + (x_hi - x_lo) * f, ty(depth(s))))
             s += RING_STEP
-        n = max(2, int((y1 - y0) / RING_STEP) + 2)      # 右边 上→下
+        n = max(2, int((y_hi - y_lo) / RING_STEP) + 2)      # 右边 上→下
         for i in range(1, n):
             f = i / (n - 1)
-            pts.append((R - w - depth(s), y0 + (y1 - y0) * f))
+            pts.append((rx(depth(s)), y_lo + (y_hi - y_lo) * f))
             s += RING_STEP
-        n = max(2, int((x1 - x0) / RING_STEP) + 2)      # 底边 右→左
+        n = max(2, int((x_hi - x_lo) / RING_STEP) + 2)      # 底边 右→左
         for i in range(1, n):
             f = i / (n - 1)
-            pts.append((x1 - (x1 - x0) * f, B - h - depth(s)))
+            pts.append((x_hi - (x_hi - x_lo) * f, by_(depth(s))))
             s += RING_STEP
-        n = max(2, int((y1 - y0) / RING_STEP) + 2)      # 左边 下→上
+        n = max(2, int((y_hi - y_lo) / RING_STEP) + 2)      # 左边 下→上
         for i in range(1, n - 1):
             f = i / (n - 1)
-            pts.append((L + depth(s), y1 - (y1 - y0) * f))
+            pts.append((lx(depth(s)), y_hi - (y_hi - y_lo) * f))
             s += RING_STEP
         return pts
 
     def _band_clamp(self, x, y):
-        """散步位置约束：窗口完整留在屏幕内（边距 ≥12px）；若深入中央
-        死区且刚浅越界（拖拽后的过渡不管，交给寻路自行走回环上）。"""
-        g = self._scr_rect()
-        w, h = self.width(), self.height()
-        m = 12.0
-        if x < g.left() + m:
-            x = g.left() + m
-        elif x > g.right() - w - m:
-            x = g.right() - w - m
-        if y < g.top() + m:
-            y = g.top() + m
-        elif y > g.bottom() - h - m:
-            y = g.bottom() - h - m
-        # 中央死区（窗沿四边都深入 >BAND_FAR）：浅越界贴回环带内沿
-        if (x >= g.left() + BAND_FAR and x <= g.right() - w - BAND_FAR
-                and y >= g.top() + BAND_FAR
-                and y <= g.bottom() - h - BAND_FAR):
-            dl = x - (g.left() + BAND_FAR - 1)
-            dr = (g.right() - w - BAND_FAR + 1) - x
-            dt = y - (g.top() + BAND_FAR - 1)
-            db = (g.bottom() - h - BAND_FAR + 1) - y
-            mn = min(dl, dr, dt, db)
-            if mn <= 6.0:
-                if mn == dl:
-                    x = g.left() + BAND_FAR - 1
-                elif mn == dr:
-                    x = g.right() - w - BAND_FAR + 1
-                elif mn == dt:
-                    y = g.top() + BAND_FAR - 1
-                else:
-                    y = g.bottom() - h - BAND_FAR + 1
+        """活动范围约束（2026-10-28 用户裁决：只在当前所在屏幕角活动）：
+        ① 角色可见区完整留在活动框内；② 整个窗口不出屏；
+        ③ 角色四边都深入框中央死区、且刚越界 ≤6px 时贴回框内沿——
+        拖拽后的过渡不管，交给寻路自行走回环上。"""
+        x_lo, x_hi, y_lo, y_hi = self._ring_bounds()
+        x = clamp(x, x_lo, x_hi)
+        y = clamp(y, y_lo, y_hi)
+        box = self._home_box()
+        ox, oy, cw, ch = self._char_box()
+        cl = (x + ox) - box.left()                    # 角色四边距框内沿
+        cr = box.right() - (x + ox + cw)
+        ct = (y + oy) - box.top()
+        cb = box.bottom() - (y + oy + ch)
+        mn = min(cl, cr, ct, cb)
+        if BAND_FAR < mn <= BAND_FAR + 6.0:           # 刚浅越界：推回框内沿
+            if mn == cl:
+                x = box.left() + BAND_FAR - 1.0 - ox
+            elif mn == cr:
+                x = box.right() - BAND_FAR + 1.0 - cw - ox
+            elif mn == ct:
+                y = box.top() + BAND_FAR - 1.0 - oy
+            else:
+                y = box.bottom() - BAND_FAR + 1.0 - ch - oy
+            x = clamp(x, x_lo, x_hi)
+            y = clamp(y, y_lo, y_hi)
         return x, y
 
     def _wander_start(self):
@@ -1553,7 +1608,7 @@ class EjeePet(EjeePaintMixin, QWidget):
             self._bread.set_hot(
                 math.hypot(gp.x() - mg.x(), gp.y() - mg.y()) <= 48 * self.size)
 
-        # ---- 自由走动：沿屏幕四周边框带环行（不横穿中央），走够收工张望 ----
+        # ---- 自由走动：沿活动框（当前所在角落）的边框带环行，走够收工张望 ----
         if self._wander is not None:
             w = self._wander
             if (self._dragging or self._pass or self.state == "sleep"
@@ -1858,22 +1913,24 @@ class EjeePet(EjeePaintMixin, QWidget):
         self._dvx *= math.exp(-10 * dt)
         self._dvy *= math.exp(-10 * dt)
 
-        # 松手惯性滑行（带撞墙反弹）
+        # 松手惯性滑行（带撞框反弹：撞的是活动框的边，不是屏幕边）
         if self._glide is not None:
             gx_, gy_ = self._glide
             self.move(self.pos() + QPoint(int(gx_ * dt), int(gy_ * dt)))
             dec = math.exp(-3.2 * dt)
             gx_, gy_ = gx_ * dec, gy_ * dec
-            g = self.frameGeometry()
-            scr = self._scr_rect()
+            box = self._home_box()
+            ox, oy, cw, ch = self._char_box()
+            cx_ = self.x() + ox                     # 角色可见区左/右/上/下
+            cy_ = self.y() + oy
             hit = False
-            if g.left() <= scr.left() + 4 and gx_ < 0:
+            if cx_ <= box.left() + 4 and gx_ < 0:
                 gx_ = -gx_ * 0.45; hit = True
-            if g.right() >= scr.right() - 4 and gx_ > 0:
+            if cx_ + cw >= box.right() - 4 and gx_ > 0:
                 gx_ = -gx_ * 0.45; hit = True
-            if g.top() <= scr.top() + 4 and gy_ < 0:
+            if cy_ <= box.top() + 4 and gy_ < 0:
                 gy_ = -gy_ * 0.45; hit = True
-            if g.bottom() >= scr.bottom() - 4 and gy_ > 0:
+            if cy_ + ch >= box.bottom() - 4 and gy_ > 0:
                 gy_ = -gy_ * 0.45; hit = True
             if hit:
                 self._sq.kick(2.6)
@@ -2848,6 +2905,10 @@ class EjeePet(EjeePaintMixin, QWidget):
                 if v > 80:                   # 松手惯性甩动
                     self._glide = [self._dvx * 0.85, self._dvy * 0.85]
                 self._sq.kick(clamp(self._dvx / 900.0, -2.0, 2.0))
+                # 拖放落位后立刻收进活动框：活动框按落点所在角重算，
+                # 跨角拖就是换角；落在中线附近时这一下把身体完整收进新框
+                bx_, by_ = self._band_clamp(float(self.x()), float(self.y()))
+                self.move(int(bx_), int(by_))
             self._press_pos = None
             self._dragging = False
 

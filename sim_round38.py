@@ -1549,6 +1549,151 @@ def main():
           m[270 * 400 + 178] and m[305 * 400 + 178]
           and not m[250 * 400 + 120])
 
+    # ---- 13o. 活动范围限定在当前角落 + 缩放下限 0.3（2026-10-28 用户裁决）----
+    print("  [13o] 活动框（当前角落）/ 缩放下限")
+    from PySide6.QtCore import QRect as _QRect
+    FAKE = _QRect(0, 0, 1920, 1040)      # 离屏默认屏只有 800×800，装不下半屏框
+    p35 = make_pet(app, w=400, h=472, x=1200, y=600)
+    p35.size = 1.0
+    p35._scr_rect = lambda: FAKE
+    p35._ring_phase = 0.0
+
+    def _char_rect(p, x, y):
+        ox, oy, cw, ch = p._char_box()
+        return x + ox, y + oy, x + ox + cw, y + oy + ch
+
+    # ① 活动框 = 角色中心所在那个角的象限（半屏 × 半屏）
+    for (px, py), (bl, bt, note) in [
+            ((50, 40), (0, 0, "左上")), ((1200, 40), (960, 0, "右上")),
+            ((50, 600), (0, 520, "左下")), ((1200, 600), (960, 520, "右下"))]:
+        p35.move(px, py)
+        b = p35._home_box()
+        check("活动框：%s角 -> 就用该象限" % note,
+              abs(b.left() - bl) <= 1 and abs(b.top() - bt) <= 1
+              and abs(b.width() - 960) <= 1 and abs(b.height() - 520) <= 1,
+              "box=%.0f,%.0f %.0fx%.0f"
+              % (b.left(), b.top(), b.width(), b.height()))
+
+    # ② 散步环：航点够密，且每一点的角色可见区都在框内（结构上不越角）
+    p35.move(1200, 600)
+    pts = p35._ring_pts()
+    box = p35._home_box()
+    inside = all(
+        box.left() - 1 <= cx0 and cx1 <= box.right() + 1
+        and box.top() - 1 <= cy0 and cy1 <= box.bottom() + 1
+        for (x, y) in pts for (cx0, cy0, cx1, cy1) in [_char_rect(p35, x, y)])
+    check("活动框：散步环航点够密", len(pts) >= 20, "n=%d" % len(pts))
+    check("活动框：环上每点角色都在框内（不去别的角）", inside, "n=%d" % len(pts))
+    # 环是"沿框边走"：每点至少贴着一条框边 BAND_FAR 以内（不待在框中央）
+    far = E.BAND_FAR + 2.0
+    near = all(min(cx0 - box.left(), box.right() - cx1,
+                   cy0 - box.top(), box.bottom() - cy1) <= far
+               for (x, y) in pts for (cx0, cy0, cx1, cy1) in [_char_rect(p35, x, y)])
+    check("活动框：环贴着框边走（距最近框边 ≤ %.0fpx）" % far, near)
+
+    # ③ 硬 clamp：把远处坐标拉回框内，角色仍完整在框里
+    for (tx, ty) in [(-9999.0, -9999.0), (9999.0, 9999.0), (0.0, 0.0)]:
+        cx, cy = E.EjeePet._band_clamp(p35, tx, ty)
+        cx0, cy0, cx1, cy1 = _char_rect(p35, cx, cy)
+        check("活动框：clamp(%.0f,%.0f) 后角色在框内" % (tx, ty),
+              box.left() - 1 <= cx0 and cx1 <= box.right() + 1
+              and box.top() - 1 <= cy0 and cy1 <= box.bottom() + 1,
+              "char=%.0f,%.0f..%.0f,%.0f" % (cx0, cy0, cx1, cy1))
+
+    # ④ 拖到别的角 -> 框跟着换（活动范围是"当前所在角落"）
+    b_br = p35._home_box()
+    p35.move(60, 40)
+    b_tl = p35._home_box()
+    check("活动框：拖到左上角后框也跟着换",
+          b_tl.left() < b_br.left() and b_tl.top() < b_br.top(),
+          "br=%.0f,%.0f tl=%.0f,%.0f"
+          % (b_br.left(), b_br.top(), b_tl.left(), b_tl.top()))
+
+    # ⑤ 真散步 20s：寻路 + 硬 clamp 联动，每一帧角色都不越角
+    p39 = make_pet(app, w=400, h=472, x=1200, y=600)
+    p39.size = 1.0
+    p39._scr_rect = lambda: FAKE
+    p39._band_clamp = lambda x, y: E.EjeePet._band_clamp(p39, x, y)
+    p39.t = 0.0
+    p39._last_t = 0.0
+    p39.clock.ms = 0.0
+    p39._next_walk = 0.0
+    p39._wander_start()
+    b39 = p39._home_box()
+    ox39, oy39, cw39, ch39 = p39._char_box()
+    bad39, pvx, pvy, walked = 0, p39.x(), p39.y(), 0.0
+    for _i in range(20 * 30):
+        p39.clock.ms += 1000.0 / 30.0
+        p39._tick()
+        _cx0, _cy0 = p39.x() + ox39, p39.y() + oy39
+        walked += abs(p39.x() - pvx) + abs(p39.y() - pvy)
+        pvx, pvy = p39.x(), p39.y()
+        if (_cx0 < b39.left() - 1 or _cx0 + cw39 > b39.right() + 1
+                or _cy0 < b39.top() - 1 or _cy0 + ch39 > b39.bottom() + 1):
+            bad39 += 1
+    check("活动框：真散步 20s 没有一帧越角", bad39 == 0, "bad=%d" % bad39)
+    check("活动框：真散步确实走起来了（>200px）", walked > 200,
+          "walked=%.0f" % walked)
+
+    # ⑥ 傲娇闪现只在同一个框里反射（不跑到别的象限）
+    p36 = make_pet(app, w=400, h=472, x=1200, y=600)
+    p36.size = 1.0
+    p36._scr_rect = lambda: FAKE
+    p36.t = 5.0
+    p36._last_t = 5.0
+    p36._start_shy()
+    b36 = p36._home_box()
+    cx0, cy0, cx1, cy1 = _char_rect(p36, p36.x(), p36.y())
+    check("活动框：傲娇闪现仍留在原框内",
+          b36.left() - 1 <= cx0 and cx1 <= b36.right() + 1
+          and b36.top() - 1 <= cy0 and cy1 <= b36.bottom() + 1,
+          "char=%.0f,%.0f..%.0f,%.0f box=%.0f,%.0f..%.0f,%.0f"
+          % (cx0, cy0, cx1, cy1, b36.left(), b36.top(),
+             b36.right(), b36.bottom()))
+    check("活动框：闪现确实换了位置",
+          abs(p36.x() - 1200) > 100 or abs(p36.y() - 600) > 40,
+          "pos=%d,%d" % (p36.x(), p36.y()))
+
+    # ⑥ 缩放下限 0.3（用户裁决：可以缩得更小）
+    check("缩放：下限 = 0.3", abs(E.SIZE_MIN - 0.3) < 1e-9, "min=%g" % E.SIZE_MIN)
+    p37 = make_pet(app)
+    p37.size = 0.5
+    p37.target_size = 0.5
+    p37._zoom_steps(-12000.0, QPoint(p37.x() + 50, p37.y() + 50))
+    check("缩放：一路缩小停在 0.3（不越下限）",
+          abs(p37.target_size - 0.3) < 1e-9, "%.3f" % p37.target_size)
+    p37.set_size(0.1)
+    check("缩放：set_size(0.1) 被夹到 0.3",
+          abs(p37.target_size - 0.3) < 1e-9, "%.3f" % p37.target_size)
+    p37.size = 1.0
+    p37._zoom_anchor = None
+    p37._apply_size(0.3)
+    check("缩放：0.3 时窗口 120×142",
+          p37.width() == 120 and p37.height() == 142,
+          "%dx%d" % (p37.width(), p37.height()))
+    p37._scr_rect = lambda: FAKE
+    p37.move(1500, 700)
+    b37 = p37._home_box()
+    ox, oy, cw, ch = p37._char_box()
+    check("缩放：0.3 时活动框仍按象限算",
+          abs(b37.width() - 960) <= 1 and cw < 100,
+          "box=%.0fx%.0f char=%.0fx%.0f"
+          % (b37.width(), b37.height(), cw, ch))
+
+    # ⑦ 极小屏：象限装不下角色 -> 该轴退回整屏，范围绝不倒挂
+    p38 = make_pet(app, w=400, h=472, x=100, y=100)
+    p38.size = 1.0
+    p38._scr_rect = lambda: _QRect(0, 0, 640, 480)
+    b38 = p38._home_box()
+    check("活动框：小屏装不下角色时退回整屏",
+          b38.width() >= 600 and b38.height() >= 440,
+          "%.0fx%.0f" % (b38.width(), b38.height()))
+    x_lo, x_hi, y_lo, y_hi = p38._ring_bounds()
+    check("活动框：小屏可走范围不倒挂（寻路不会原地打转）",
+          x_lo <= x_hi and y_lo <= y_hi,
+          "x %.0f..%.0f / y %.0f..%.0f" % (x_lo, x_hi, y_lo, y_hi))
+    check("活动框：小屏仍能生成散步路径", len(p38._ring_pts()) > 0)
+
     print("\n" + "=" * 52)
     if FAILED:
         print("FAILED %d:" % len(FAILED))

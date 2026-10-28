@@ -1549,10 +1549,11 @@ def main():
           m[270 * 400 + 178] and m[305 * 400 + 178]
           and not m[250 * 400 + 120])
 
-    # ---- 13o. 活动范围限定在当前角落 + 缩放下限 0.3（2026-10-28 用户裁决）----
-    print("  [13o] 活动框（当前角落）/ 缩放下限")
+    # ---- 13o. 活动范围＝整屏四周边框 + 边带收窄 + 缩放下限 0.3 ----
+    print("  [13o] 活动范围（整屏边框 + 边带收窄）/ 缩放下限")
     from PySide6.QtCore import QRect as _QRect
-    FAKE = _QRect(0, 0, 1920, 1040)      # 离屏默认屏只有 800×800，装不下半屏框
+    FAKE = _QRect(0, 0, 1920, 1040)      # 离屏默认屏只有 800×800，装不下整屏环
+    FL, FT, FR, FB = 0.0, 0.0, 1920.0, 1040.0
     p35 = make_pet(app, w=400, h=472, x=1200, y=600)
     p35.size = 1.0
     p35._scr_rect = lambda: FAKE
@@ -1562,54 +1563,95 @@ def main():
         ox, oy, cw, ch = p._char_box()
         return x + ox, y + oy, x + ox + cw, y + oy + ch
 
-    # ① 活动框 = 角色中心所在那个角的象限（半屏 × 半屏）
-    for (px, py), (bl, bt, note) in [
-            ((50, 40), (0, 0, "左上")), ((1200, 40), (960, 0, "右上")),
-            ((50, 600), (0, 520, "左下")), ((1200, 600), (960, 520, "右下"))]:
+    def _min_edge(p, x, y):
+        """角色可见区距最近屏幕边的距离。"""
+        cx0, cy0, cx1, cy1 = _char_rect(p, x, y)
+        return min(cx0 - FL, FR - cx1, cy0 - FT, FB - cy1)
+
+    # ① 活动框 = 整个屏幕（不再是"当前所在角落的象限"）
+    for (px, py), note in [((50, 40), "左上"), ((1200, 40), "右上"),
+                           ((50, 600), "左下"), ((1200, 600), "右下")]:
         p35.move(px, py)
         b = p35._home_box()
-        check("活动框：%s角 -> 就用该象限" % note,
-              abs(b.left() - bl) <= 1 and abs(b.top() - bt) <= 1
-              and abs(b.width() - 960) <= 1 and abs(b.height() - 520) <= 1,
+        check("活动范围：%s角的活动框都是整个屏幕" % note,
+              abs(b.left() - FL) <= 1 and abs(b.top() - FT) <= 1
+              and abs(b.width() - 1920) <= 1 and abs(b.height() - 1040) <= 1,
               "box=%.0f,%.0f %.0fx%.0f"
               % (b.left(), b.top(), b.width(), b.height()))
 
-    # ② 散步环：航点够密，且每一点的角色可见区都在框内（结构上不越角）
+    # ② 边带收窄：带宽本身必须保持窄（防止有人把 BAND_FAR 改回 150）
+    check("活动范围：边带收窄（BAND_FAR ≤ 70）", E.BAND_FAR <= 70.0,
+          "BAND_NEAR=%.0f BAND_FAR=%.0f" % (E.BAND_NEAR, E.BAND_FAR))
+    check("活动范围：带宽 ≤ 60px", E.BAND_FAR - E.BAND_NEAR <= 60.0,
+          "带宽=%.0f" % (E.BAND_FAR - E.BAND_NEAR))
+
+    # ③ 散步环：绕整屏四边一整圈（四条边都有航点、跨度接近整屏）
     p35.move(1200, 600)
     pts = p35._ring_pts()
-    box = p35._home_box()
-    inside = all(
-        box.left() - 1 <= cx0 and cx1 <= box.right() + 1
-        and box.top() - 1 <= cy0 and cy1 <= box.bottom() + 1
-        for (x, y) in pts for (cx0, cy0, cx1, cy1) in [_char_rect(p35, x, y)])
-    check("活动框：散步环航点够密", len(pts) >= 20, "n=%d" % len(pts))
-    check("活动框：环上每点角色都在框内（不去别的角）", inside, "n=%d" % len(pts))
-    # 环是"沿框边走"：每点至少贴着一条框边 BAND_FAR 以内（不待在框中央）
-    far = E.BAND_FAR + 2.0
-    near = all(min(cx0 - box.left(), box.right() - cx1,
-                   cy0 - box.top(), box.bottom() - cy1) <= far
-               for (x, y) in pts for (cx0, cy0, cx1, cy1) in [_char_rect(p35, x, y)])
-    check("活动框：环贴着框边走（距最近框边 ≤ %.0fpx）" % far, near)
+    xs = [x for (x, _y) in pts]
+    ys = [y for (_x, y) in pts]
+    check("活动范围：散步环航点够密", len(pts) >= 60, "n=%d" % len(pts))
+    check("活动范围：环横跨整个屏幕宽度",
+          max(xs) - min(xs) >= 0.80 * (FR - FL),
+          "span=%.0f/%.0f" % (max(xs) - min(xs), FR - FL))
+    check("活动范围：环纵跨整个可用高度（纵向受整窗约束，跨度略小）",
+          max(ys) - min(ys) >= 0.48 * (FB - FT),
+          "span=%.0f/%.0f" % (max(ys) - min(ys), FB - FT))
+    for note, hit in [
+            ("贴顶边", any(abs(y - min(ys)) <= 6 for y in ys)),
+            ("贴底边", any(abs(y - max(ys)) <= 6 for y in ys)),
+            ("贴左边", any(abs(x - min(xs)) <= 6 for x in xs)),
+            ("贴右边", any(abs(x - max(xs)) <= 6 for x in xs))]:
+        check("活动范围：环走遍四条屏幕边（%s）" % note, hit)
 
-    # ③ 硬 clamp：把远处坐标拉回框内，角色仍完整在框里
+    # ④ 环上每点：角色完整在屏内；横向真贴屏边、纵向在边带内
+    inside = all(FL - 1 <= cx0 and cx1 <= FR + 1
+                 and FT - 1 <= cy0 and cy1 <= FB + 1
+                 for (x, y) in pts for (cx0, cy0, cx1, cy1) in [_char_rect(p35, x, y)])
+    check("活动范围：环上每点角色都完整在屏内", inside, "n=%d" % len(pts))
+
+    def _edges(x, y):
+        cx0, cy0, cx1, cy1 = _char_rect(p35, x, y)
+        return cx0 - FL, FR - cx1, cy0 - FT, FB - cy1
+
+    lt = min(_edges(x, y)[0] for (x, y) in pts)
+    rt = min(_edges(x, y)[1] for (x, y) in pts)
+    check("活动范围：角色真正贴到屏幕左边（≈ BAND_NEAR）",
+          abs(lt - E.BAND_NEAR) <= 3.0, "min=%.1f" % lt)
+    check("活动范围：角色真正贴到屏幕右边（≈ BAND_NEAR）",
+          abs(rt - E.BAND_NEAR) <= 3.0, "min=%.1f" % rt)
+    # 边带收窄后的核心：环上每点离最近的那条"可走边界"不超过带宽
+    bx_lo, bx_hi, by_lo, by_hi = p35._ring_bounds()
+    band = E.BAND_FAR - E.BAND_NEAR
+    dep = max(min(y - by_lo, by_hi - y, x - bx_lo, bx_hi - x) for (x, y) in pts)
+    check("活动范围：环上每点都贴着边框（离最近边界 ≤ %.0fpx）" % band,
+          dep <= band + 1.0, "max=%.1f" % dep)
+    # 贴顶时不给气泡让位的话气泡会被切：角色顶距屏必须 ≥ 图像固有留白
+    oy35 = p35._char_box()[1]
+    top_min = min(_edges(x, y)[2] for (x, y) in pts)
+    check("活动范围：贴顶时仍给气泡留出位置（不压到屏外）",
+          top_min >= oy35 - 1.0, "top_min=%.1f oy=%.1f" % (top_min, oy35))
+
+    # ⑤ 硬 clamp：把远处坐标拉回，角色仍在屏内
     for (tx, ty) in [(-9999.0, -9999.0), (9999.0, 9999.0), (0.0, 0.0)]:
         cx, cy = E.EjeePet._band_clamp(p35, tx, ty)
         cx0, cy0, cx1, cy1 = _char_rect(p35, cx, cy)
-        check("活动框：clamp(%.0f,%.0f) 后角色在框内" % (tx, ty),
-              box.left() - 1 <= cx0 and cx1 <= box.right() + 1
-              and box.top() - 1 <= cy0 and cy1 <= box.bottom() + 1,
+        check("活动范围：clamp(%.0f,%.0f) 后角色在屏内" % (tx, ty),
+              FL - 1 <= cx0 and cx1 <= FR + 1
+              and FT - 1 <= cy0 and cy1 <= FB + 1,
               "char=%.0f,%.0f..%.0f,%.0f" % (cx0, cy0, cx1, cy1))
 
-    # ④ 拖到别的角 -> 框跟着换（活动范围是"当前所在角落"）
+    # ⑥ 换到别的角 -> 活动框不变（始终是整屏）
     b_br = p35._home_box()
     p35.move(60, 40)
     b_tl = p35._home_box()
-    check("活动框：拖到左上角后框也跟着换",
-          b_tl.left() < b_br.left() and b_tl.top() < b_br.top(),
-          "br=%.0f,%.0f tl=%.0f,%.0f"
-          % (b_br.left(), b_br.top(), b_tl.left(), b_tl.top()))
+    check("活动范围：换角后框不变（始终整屏）",
+          abs(b_tl.width() - b_br.width()) <= 1
+          and abs(b_tl.height() - b_br.height()) <= 1,
+          "br=%.0fx%.0f tl=%.0fx%.0f"
+          % (b_br.width(), b_br.height(), b_tl.width(), b_tl.height()))
 
-    # ⑤ 真散步 20s：寻路 + 硬 clamp 联动，每一帧角色都不越角
+    # ⑦ 真散步 20s：寻路 + 硬 clamp 联动，每一帧角色都不出屏
     p39 = make_pet(app, w=400, h=472, x=1200, y=600)
     p39.size = 1.0
     p39._scr_rect = lambda: FAKE
@@ -1619,39 +1661,40 @@ def main():
     p39.clock.ms = 0.0
     p39._next_walk = 0.0
     p39._wander_start()
-    b39 = p39._home_box()
     ox39, oy39, cw39, ch39 = p39._char_box()
-    bad39, pvx, pvy, walked = 0, p39.x(), p39.y(), 0.0
+    d39lx, d39hx, d39ly, d39hy = p39._ring_bounds()
+    bad39, deep39, pvx, pvy, walked = 0, 0.0, p39.x(), p39.y(), 0.0
     for _i in range(20 * 30):
         p39.clock.ms += 1000.0 / 30.0
         p39._tick()
         _cx0, _cy0 = p39.x() + ox39, p39.y() + oy39
         walked += abs(p39.x() - pvx) + abs(p39.y() - pvy)
         pvx, pvy = p39.x(), p39.y()
-        if (_cx0 < b39.left() - 1 or _cx0 + cw39 > b39.right() + 1
-                or _cy0 < b39.top() - 1 or _cy0 + ch39 > b39.bottom() + 1):
+        if (_cx0 < FL - 1 or _cx0 + cw39 > FR + 1
+                or _cy0 < FT - 1 or _cy0 + ch39 > FB + 1):
             bad39 += 1
-    check("活动框：真散步 20s 没有一帧越角", bad39 == 0, "bad=%d" % bad39)
-    check("活动框：真散步确实走起来了（>200px）", walked > 200,
+        deep39 = max(deep39, min(p39.x() - d39lx, d39hx - p39.x(),
+                                 p39.y() - d39ly, d39hy - p39.y()))
+    check("活动范围：真散步 20s 没有一帧出屏", bad39 == 0, "bad=%d" % bad39)
+    check("活动范围：真散步确实走起来了（>200px）", walked > 200,
           "walked=%.0f" % walked)
+    check("活动范围：真散步全程都贴着边框（不往中间晃）",
+          deep39 <= (E.BAND_FAR - E.BAND_NEAR) + 6.0, "max=%.1f" % deep39)
 
-    # ⑥ 傲娇闪现只在同一个框里反射（不跑到别的象限）
+    # ⑧ 傲娇闪现到屏幕另一侧的边框带里
     p36 = make_pet(app, w=400, h=472, x=1200, y=600)
     p36.size = 1.0
     p36._scr_rect = lambda: FAKE
     p36.t = 5.0
     p36._last_t = 5.0
     p36._start_shy()
-    b36 = p36._home_box()
     cx0, cy0, cx1, cy1 = _char_rect(p36, p36.x(), p36.y())
-    check("活动框：傲娇闪现仍留在原框内",
-          b36.left() - 1 <= cx0 and cx1 <= b36.right() + 1
-          and b36.top() - 1 <= cy0 and cy1 <= b36.bottom() + 1,
-          "char=%.0f,%.0f..%.0f,%.0f box=%.0f,%.0f..%.0f,%.0f"
-          % (cx0, cy0, cx1, cy1, b36.left(), b36.top(),
-             b36.right(), b36.bottom()))
-    check("活动框：闪现确实换了位置",
-          abs(p36.x() - 1200) > 100 or abs(p36.y() - 600) > 40,
+    check("活动范围：傲娇闪现后角色仍在屏内",
+          FL - 1 <= cx0 and cx1 <= FR + 1
+          and FT - 1 <= cy0 and cy1 <= FB + 1,
+          "char=%.0f,%.0f..%.0f,%.0f" % (cx0, cy0, cx1, cy1))
+    check("活动范围：闪现确实换了位置且跨到屏幕另一侧",
+          abs(p36.x() - 1200) > 300,
           "pos=%d,%d" % (p36.x(), p36.y()))
 
     # ⑥ 缩放下限 0.3（用户裁决：可以缩得更小）
@@ -1673,26 +1716,29 @@ def main():
           "%dx%d" % (p37.width(), p37.height()))
     p37._scr_rect = lambda: FAKE
     p37.move(1500, 700)
+    p37._ring_phase = 0.0
     b37 = p37._home_box()
     ox, oy, cw, ch = p37._char_box()
-    check("缩放：0.3 时活动框仍按象限算",
-          abs(b37.width() - 960) <= 1 and cw < 100,
-          "box=%.0fx%.0f char=%.0fx%.0f"
-          % (b37.width(), b37.height(), cw, ch))
+    _near37 = min(_min_edge(p37, x, y) for (x, y) in p37._ring_pts())
+    check("缩放：0.3 时活动范围仍贴屏幕边",
+          abs(b37.width() - 1920) <= 1 and cw < 100
+          and abs(_near37 - E.BAND_NEAR) <= 3.0,
+          "box=%.0fx%.0f char=%.0fx%.0f near=%.1f"
+          % (b37.width(), b37.height(), cw, ch, _near37))
 
-    # ⑦ 极小屏：象限装不下角色 -> 该轴退回整屏，范围绝不倒挂
+    # ⑨ 极小屏：活动框仍是整屏，可走范围绝不倒挂
     p38 = make_pet(app, w=400, h=472, x=100, y=100)
     p38.size = 1.0
     p38._scr_rect = lambda: _QRect(0, 0, 640, 480)
     b38 = p38._home_box()
-    check("活动框：小屏装不下角色时退回整屏",
-          b38.width() >= 600 and b38.height() >= 440,
+    check("活动范围：小屏下活动框仍是整个屏幕",
+          abs(b38.width() - 640) <= 1 and abs(b38.height() - 480) <= 1,
           "%.0fx%.0f" % (b38.width(), b38.height()))
     x_lo, x_hi, y_lo, y_hi = p38._ring_bounds()
-    check("活动框：小屏可走范围不倒挂（寻路不会原地打转）",
+    check("活动范围：小屏可走范围不倒挂（寻路不会原地打转）",
           x_lo <= x_hi and y_lo <= y_hi,
           "x %.0f..%.0f / y %.0f..%.0f" % (x_lo, x_hi, y_lo, y_hi))
-    check("活动框：小屏仍能生成散步路径", len(p38._ring_pts()) > 0)
+    check("活动范围：小屏仍能生成散步路径", len(p38._ring_pts()) > 0)
 
     print("\n" + "=" * 52)
     if FAILED:

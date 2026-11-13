@@ -93,10 +93,13 @@ EJEE（伊吉）桌面宠物 —— 功能说明
      · 记性                昼夜问候（跨天说早安/晚安）、久别重逢的第一句、
                            陪伴档案（右键 / 托盘菜单：陪伴天数/喂食/摸头/
                            当前饱食度）、喂食与摸头计数（存档累计）
-     · 成就册              25 项成就（陪伴 / 投喂 / 摸头 / 专注 / 玩闹，铜银金
-                           三档，其中 7 个隐藏）：右键或托盘「成就册…」打开
+     · 成就册              43 项成就（陪伴 / 投喂 / 摸头 / 专注 / 玩闹，铜银金
+                           三档，其中 9 个隐藏；含连续 30 天 / 累计陪伴 100 小时 /
+                           投喂 1000 次这类长期目标）：右键或托盘「成就册…」打开
                            分类筛选 + 进度条 + 达成日期，隐藏项未解锁只露线索；
                            解锁时金框气泡内嵌奖章（档位星数）、按档撒彩纸/星星
+     · 头顶叶子            从 4 倍原图重抠的完整叶子（base.png 顶部曾把叶尖切平），
+                           素材与 LEAF_GEO 由 tools/repair_leaf.py 配对着改
      · 自言自语            30~60s 随机微表情（惊讶 / 庆祝），10% 概率顺带说一句
      · 饱食度              100→0 恰好 4 小时且越低掉得越快（解析解 _hunger_after）；
                            离线按同一公式补扣；<30 开始闹饿（4~7 分钟提醒一次）
@@ -463,6 +466,29 @@ ACH_DEFS = {
                   cat="company", tier=1, stat="early", goal=1, hidden=True,
                   hint="在很早的清晨，天刚亮的时候……",
                   phrase="天刚亮就来了！早起的鸟儿有吐司吃吗？"),
+    # ---- 长期陪伴（2026-11-13 新增）----
+    "streak3": dict(name="连着三天", desc="连续 3 天来找我",
+                    cat="company", tier=1, stat="streak", goal=3,
+                    phrase="连着三天都来了！我把这三天都记在小本子上啦。"),
+    "streak7": dict(name="一周不打烊", desc="连续 7 天见面",
+                    cat="company", tier=2, stat="streak", goal=7,
+                    phrase="整整一周一天都没断过！你已经是我生活的一部分了。"),
+    "streak30": dict(name="形影不离", desc="连续 30 天见面",
+                     cat="company", tier=3, stat="streak", goal=30,
+                     phrase="三十天，一天都没落下……我都不知道该说什么好了。"),
+    "online60": dict(name="一个钟头", desc="累计陪你待 60 分钟",
+                     cat="company", tier=1, stat="online_min", goal=60,
+                     phrase="一个钟头就这么过去了，跟你在一起时间过得特别快。"),
+    "online20h": dict(name="二十小时", desc="累计陪你待 20 小时",
+                      cat="company", tier=2, stat="online_min", goal=1200,
+                      phrase="二十个小时！换算成吐司大概是……一整座山。"),
+    "online100h": dict(name="一百小时", desc="累计陪你待 100 小时",
+                       cat="company", tier=3, stat="online_min", goal=6000,
+                       phrase="一百个小时，够绕这座城好几圈了吧？谢谢你都在。"),
+    "holiday": dict(name="记得日子", desc="在节日或生日当天来看我",
+                    cat="company", tier=2, stat="holiday", goal=1, hidden=True,
+                    hint="有些日子，一年只有一次。",
+                    phrase="今天是个特别的日子呀——你居然记得。"),
     # ---------------- 投喂 ----------------
     "fed1": dict(name="第一口面包", desc="第一次喂 EJEE 吃牛奶吐司",
                  cat="feed", tier=1, stat="fed", goal=1,
@@ -480,6 +506,13 @@ ACH_DEFS = {
                     cat="feed", tier=2, stat="stuffed", goal=1, hidden=True,
                     hint="一直喂，喂到再也塞不进去为止。",
                     phrase="真的吃不下了啦……肚子圆得像个泡泡。"),
+    # ---- 长期投喂（2026-11-13 新增）----
+    "feed_day5": dict(name="一天五顿", desc="单日投喂 5 次",
+                      cat="feed", tier=2, stat="feed_day_max", goal=5,
+                      phrase="今天第五顿啦！我这条鱼快被喂成球了。"),
+    "fed1000": dict(name="喂到天荒地老", desc="累计投喂 1000 次",
+                    cat="feed", tier=3, stat="fed", goal=1000,
+                    phrase="一千个吐司……我大概能绕地球游半圈了。"),
     # ---------------- 摸头 ----------------
     "pat1": dict(name="第一次摸头", desc="第一次摸 EJEE 的头",
                  cat="pat", tier=1, stat="pets", goal=1,
@@ -494,6 +527,13 @@ ACH_DEFS = {
                 cat="pat", tier=1, stat="shy", goal=1, hidden=True,
                 hint="在同一个地方，摸得太多次。",
                 phrase="摸、摸够了啦！我要躲起来冷静一下！"),
+    # ---- 长期摸头（2026-11-13 新增）----
+    "pat_day20": dict(name="今天摸够了", desc="单日摸头 20 次",
+                      cat="pat", tier=2, stat="pat_day_max", goal=20,
+                      phrase="今天第二十次了！我的头已经热乎乎的了。"),
+    "pat2000": dict(name="摸头两千次", desc="累计摸头 2000 次",
+                    cat="pat", tier=3, stat="pets", goal=2000,
+                    phrase="两千次摸头……这不是摸头，这是把脑袋盘活了。"),
     # ---------------- 专注 ----------------
     "pomo1": dict(name="第一颗番茄", desc="完成第一颗番茄钟",
                   cat="pomo", tier=1, stat="pomo_total", goal=1,
@@ -508,6 +548,20 @@ ACH_DEFS = {
                       cat="pomo", tier=3, stat="pomo_long", goal=1, hidden=True,
                       hint="一次专注，至少要两个小时。",
                       phrase="两个小时……你就这么坐着一动不动，好厉害。"),
+    # ---- 长期专注（2026-11-13 新增）----
+    "focus10h": dict(name="十小时专注", desc="累计专注满 10 小时",
+                     cat="pomo", tier=2, stat="pomo_min_total", goal=600,
+                     phrase="十个小时的专注，我一直在旁边看着呢。"),
+    "focus50h": dict(name="五十小时专注", desc="累计专注满 50 小时",
+                     cat="pomo", tier=3, stat="pomo_min_total", goal=3000,
+                     phrase="五十个小时……你认真起来的样子，我最喜欢了。"),
+    "pomo_day4": dict(name="一天四颗", desc="单日完成 4 颗番茄钟",
+                      cat="pomo", tier=2, stat="pomo_day_max", goal=4,
+                      phrase="一天四颗番茄！今天这脑袋是开过光的。"),
+    "night_pomo": dict(name="深夜的灯", desc="在 23 点到次日 5 点之间完成一颗番茄钟",
+                       cat="pomo", tier=3, stat="night_pomo", goal=1,
+                       hidden=True, hint="灯还亮着，已经是第二天了。",
+                       phrase="这么晚还在专注……那我把泡泡调暗一点，陪着你。"),
     # ---------------- 玩闹 ----------------
     "mischief": dict(name="尾巴不是玩具", desc="第一次抓 EJEE 的尾巴",
                      cat="play", tier=1, stat="mischief", goal=1, hidden=True,
@@ -526,7 +580,27 @@ ACH_DEFS = {
     "collector": dict(name="收集家", desc="解锁 15 个其他成就",
                       cat="play", tier=3, stat="ach_count", goal=15,
                       phrase="收集家！你把我的小秘密都找出来啦。"),
+    # ---- 长期玩闹（2026-11-13 新增）----
+    "mischief10": dict(name="尾巴十次", desc="累计抓 10 次尾巴",
+                       cat="play", tier=2, stat="mischief", goal=10,
+                       phrase="第十次了！你是真的不长记性（我也真的不生气）。"),
+    "cats_all": dict(name="样样都来一点", desc="五个分类里各至少解锁一个成就",
+                     cat="play", tier=3, stat="cats_all", goal=5,
+                     phrase="陪伴、投喂、摸头、专注、玩闹——你把我的每一面都翻出来了。"),
+    "ach30": dict(name="三十枚", desc="解锁 30 个成就",
+                  cat="play", tier=3, stat="ach_count", goal=30,
+                  phrase="三十枚了……我的奖章快挂不下了！"),
 }
+
+# 成就用的累计计数键：存档里都是整数，旧档缺这些键就从 0 起算
+ACH_COUNTERS = ("mischief", "dizzy", "stuffed", "shy", "pomo_long",
+                "zoom_big", "zoom_min", "night", "early",
+                "streak", "online_min", "pomo_min_total",
+                "feed_day_max", "pat_day_max", "pomo_day_max",
+                "night_pomo", "holiday")
+# 按天累计的临时计数（跨天自动清零）：(当日计数键, 单日峰值键)
+ACH_DAILY = (("feed_day", "feed_day_max"), ("pat_day", "pat_day_max"),
+             ("pomo_day", "pomo_day_max"))
 
 # 固定节日彩蛋（"月-日" -> 当天首次问候的替换台词）
 FESTIVALS = {
@@ -739,15 +813,22 @@ class EjeePet(EjeePaintMixin, QWidget):
         self._meta["ach"] = dict(ach_raw) if isinstance(ach_raw, dict) else {}
         self._meta["pomo_total"] = _to_int(data.get("pomo_total"), 0)
         # 成就埋点计数（旧档没有这些键 -> 从 0 起算）：
-        # mischief 抓尾巴次数 / dizzy 晕车次数 / stuffed 吃到拒收次数 /
-        # shy 傲娇躲避次数 / pomo_long 两小时以上番茄数 /
-        # zoom_big / zoom_min 缩放到极大极小的次数 / night / early 时段互动
-        for _k in ("mischief", "dizzy", "stuffed", "shy", "pomo_long",
-                   "zoom_big", "zoom_min", "night", "early"):
+        # mischief 抓尾巴 / dizzy 晕车 / stuffed 吃到拒收 / shy 傲娇躲避 /
+        # pomo_long 两小时以上番茄 / zoom_big / zoom_min 缩放极值 /
+        # night / early 时段互动 / streak 连续天数 / online_min 陪伴分钟 /
+        # pomo_min_total 累计专注分钟 / *_day_max 单日峰值 / night_pomo
+        # 深夜番茄 / holiday 特殊日子
+        for _k in ACH_COUNTERS:
             self._meta[_k] = _to_int(data.get(_k), 0)
+        # 按天计数（当日值 + 日期戳），跨天由 _bump_daily 归零
+        for _c, _p in ACH_DAILY:
+            self._meta[_c] = _to_int(data.get(_c), 0)
+            self._meta[_c + "_day"] = str(data.get(_c + "_day") or "")
         # 深夜/清晨的"每天只记一次"日期戳
         self._meta["night_day"] = str(data.get("night_day") or "")
         self._meta["early_day"] = str(data.get("early_day") or "")
+        # 连续见面天数的"最后一天"戳
+        self._meta["streak_day"] = str(data.get("streak_day") or "")
         # 未读成就（菜单角标用）：只保留仍然有效的键
         self._meta["ach_unseen"] = [str(k) for k in (data.get("ach_unseen") or ())
                                     if str(k) in ACH_DEFS][:8]
@@ -760,6 +841,7 @@ class EjeePet(EjeePaintMixin, QWidget):
         except (KeyError, TypeError, ValueError):
             self._restore_pos = None      # 没有（或非法）历史位置 -> 默认位
         self._save_t = 0.0            # 周期性存档节流
+        self._day_stamp = time.strftime("%Y-%m-%d")   # 本会话启动时的日历日
         self._lines = load_lines()
         self._next_chatter = random.uniform(*IDLE_CHATTER_EVERY)   # 首次闲聊 1.5-3 分钟后
         self._pomo_end = None         # 番茄钟结束时刻（self.t 基准）
@@ -1001,15 +1083,18 @@ class EjeePet(EjeePaintMixin, QWidget):
         if self._meta.get("greet_day") == today:
             return
         self._meta["greet_day"] = today
+        self._bump_streak()             # 连续见面天数（跨天首次见面推进）
         self._save()
         gap = time.time() - self._meta.get("last_seen", 0.0)
         text = self._line(self._bucket())
         if gap > 10 * 3600 and self._meta.get("last_seen", 0) > 0:
             text = "你终于回来了！" + text
         md = time.strftime("%m-%d")
+        special = False
         if self._meta.get("owner_birthday") == md:
             # 主人生日：彩纸 + 专属祝贺（庆祝跳用 celebrate 通道）
             text = self._line("owner_birthday")
+            special = True
             self._celebrate_until = self.t + 2.0
             self._sq.kick(3.0)
             for i in range(16):
@@ -1019,6 +1104,7 @@ class EjeePet(EjeePaintMixin, QWidget):
         elif self._meta.get("birthday") == md:
             # EJEE 生日：彩纸 + 专属问候（庆祝跳用 celebrate 通道）
             text = self._line("birthday")
+            special = True
             self._celebrate_until = self.t + 2.0
             self._sq.kick(3.0)
             for i in range(16):
@@ -1027,6 +1113,9 @@ class EjeePet(EjeePaintMixin, QWidget):
                     self.head_top + random.uniform(-4, 20), self.t))
         elif md in FESTIVALS:
             text = FESTIVALS[md]
+            special = True
+        if special:                      # 「记得日子」：节日/生日当天来过
+            self._meta["holiday"] = _to_int(self._meta.get("holiday"), 0) + 1
         self._say(text, 3.6)
         self._check_ach()               # day7/30/100/365 跨天在这里结算
 
@@ -1037,7 +1126,37 @@ class EjeePet(EjeePaintMixin, QWidget):
             return self._companion_days()
         if stat == "ach_count":
             return len(m.get("ach", {}))
+        if stat == "cats_all":
+            # 已有解锁成就覆盖了几个分类（"样样都来一点"）
+            got = set(m.get("ach", {}))
+            return sum(1 for c, _label in ACH_CATS
+                       if any(ACH_DEFS[k]["cat"] == c for k in got))
         return _to_int(m.get(stat), 0)
+
+    def _bump_daily(self, counter, peak):
+        """按天累计一个计数，并把「单日最高」记进 peak（跨天自动归零）。
+        用于「一天五顿」「今天摸够了」「一天四颗」这类按日成就。"""
+        today = time.strftime("%Y-%m-%d")
+        if self._meta.get(counter + "_day") != today:
+            self._meta[counter + "_day"] = today
+            self._meta[counter] = 0
+        n = _to_int(self._meta.get(counter), 0) + 1
+        self._meta[counter] = n
+        self._meta[peak] = max(_to_int(self._meta.get(peak), 0), n)
+
+    def _bump_streak(self):
+        """连续见面天数：每个跨天后的首次见面推进一格（同一天只算一次）。
+        昨天来过 -> +1；断了一天以上 -> 从 1 重新数。"""
+        today = time.strftime("%Y-%m-%d")
+        if self._meta.get("streak_day") == today:
+            return
+        yday = time.strftime("%Y-%m-%d",
+                             time.localtime(time.time() - 86400.0))
+        if self._meta.get("streak_day") == yday:
+            self._meta["streak"] = _to_int(self._meta.get("streak"), 0) + 1
+        else:
+            self._meta["streak"] = 1
+        self._meta["streak_day"] = today
 
     def _check_ach(self, announce=True):
         """成就结算：达成的里程碑记入 _meta["ach"]（每项只庆祝一次）。
@@ -1229,6 +1348,7 @@ class EjeePet(EjeePaintMixin, QWidget):
                 "heart", self.BCX + random.uniform(-42, 42),
                 self.head_top + random.uniform(-2, 14), self.t))
         self._meta["pets"] = self._meta.get("pets", 0) + 1
+        self._bump_daily("pat_day", "pat_day_max")      # 「今天摸够了」
         self._check_ach()               # pat100/pat500 在这里结算
 
     def _start_shy(self):
@@ -1772,6 +1892,14 @@ class EjeePet(EjeePaintMixin, QWidget):
                 self._pomo_n += 1
                 self._pomo_last_said = False
                 self._meta["pomo_total"] = self._meta.get("pomo_total", 0) + 1
+                # 累计专注分钟（本次番茄钟时长）+ 单日颗数 + 深夜番茄
+                self._meta["pomo_min_total"] = _to_int(
+                    self._meta.get("pomo_min_total"), 0) + max(
+                        1, int(round(getattr(self, "_pomo_total", 0.0) / 60.0)))
+                self._bump_daily("pomo_day", "pomo_day_max")
+                if time.localtime().tm_hour >= 23 or time.localtime().tm_hour < 5:
+                    self._meta["night_pomo"] = _to_int(
+                        self._meta.get("night_pomo"), 0) + 1
                 if getattr(self, "_pomo_total", 0.0) >= 120 * 60.0:
                     # 一次两小时以上（_pomo_total 是本次番茄钟总秒数）
                     self._meta["pomo_long"] = _to_int(
@@ -1949,10 +2077,24 @@ class EjeePet(EjeePaintMixin, QWidget):
                 self._say(txt, 3.0)
                 self._sq.kick(-0.6)
 
-        # 周期存档：last_seen 每 60s 刷新（昼夜问候与回来时长判定用）
+        # 周期存档：last_seen 每 60s 刷新（昼夜问候与回来时长判定用）；
+        # 顺便把「累计陪伴时长」按分钟记账（成就「一个钟头/二十小时」）
         if time.time() - self._save_t > 60.0:
             self._save_t = time.time()
+            self._meta["online_min"] = _to_int(
+                self._meta.get("online_min"), 0) + 1
             self._save()
+            self._check_ach()
+            # 跨天：本次运行期间日历翻页了才补一次问候（顺手推进连续见面
+            # 天数、结算天数类成就）。启动那一次问候由 _maybe_greet 自己做，
+            # 这里只管"开着不关、跨了午夜"的情况。
+            today = time.strftime("%Y-%m-%d")
+            if getattr(self, "_day_stamp", None) is None:
+                self._day_stamp = today
+            elif today != self._day_stamp:
+                self._day_stamp = today
+                if self.phase == "idle" and self.bubble_until < self.t:
+                    self._maybe_greet()
 
         # wake 相位：伸懒腰两段（0.38s 拉长回弹 -> 0.72s 收尾回 idle）
         if self.phase == "wake":
@@ -2635,6 +2777,7 @@ class EjeePet(EjeePaintMixin, QWidget):
         self._sq.kick(-2.2)          # 张嘴前的期待拉伸
         self._set_state("happy")
         self._meta["fed"] = self._meta.get("fed", 0) + 1
+        self._bump_daily("feed_day", "feed_day_max")   # 「一天五顿」
         # +20 溢出 100 的部分丢弃（80~99 也能喂，吃完就是 100）
         self._meta["hunger"] = clamp(before + 20.0, 0.0, 100.0)
         # 喂食连击（10s 窗口内）：第 3 口起咀嚼完改说变体台词
@@ -3214,10 +3357,12 @@ class EjeePet(EjeePaintMixin, QWidget):
         self._meta["pomo_total"] = _to_int(d.get("pomo_total"),
                                            self._meta.get("pomo_total", 0))
         # 成就埋点计数（性格痕迹也一并搬过来，新旧档都容错）
-        for k in ("mischief", "dizzy", "stuffed", "shy", "pomo_long",
-                  "zoom_big", "zoom_min", "night", "early"):
+        for k in ACH_COUNTERS:
             if k in d:
                 self._meta[k] = _to_int(d.get(k), 0)
+        for c, _p in ACH_DAILY:
+            if c in d:
+                self._meta[c] = _to_int(d.get(c), 0)
         un = d.get("ach_unseen")
         if isinstance(un, (list, tuple)):
             self._meta["ach_unseen"] = [str(k) for k in un
@@ -3252,12 +3397,16 @@ class EjeePet(EjeePaintMixin, QWidget):
         self._meta["pomo_total"] = 0
         self._meta["birthday"] = ""
         self._meta["owner_birthday"] = ""
-        # 成就埋点计数（抓尾巴/晕车/吃撑/傲娇/长跑/缩放/时段）也归零
-        for k in ("mischief", "dizzy", "stuffed", "shy", "pomo_long",
-                  "zoom_big", "zoom_min", "night", "early"):
+        # 成就埋点计数（抓尾巴/晕车/吃撑/傲娇/长跑/缩放/时段/连续天数/
+        # 陪伴分钟/专注分钟/单日峰值/深夜番茄/特殊日子）也归零
+        for k in ACH_COUNTERS:
             self._meta[k] = 0
+        for c, _p in ACH_DAILY:
+            self._meta[c] = 0
+            self._meta[c + "_day"] = ""
         self._meta["night_day"] = ""
         self._meta["early_day"] = ""
+        self._meta["streak_day"] = ""
         self._meta.pop("tips_seen", None)
         self._save()
         self._say("记忆清空啦……我们、重新认识一下吧？", 3.6)

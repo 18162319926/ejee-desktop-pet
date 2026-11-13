@@ -155,6 +155,21 @@ def make_pet(app, w=400, h=340, x=200, y=300):
     pet._meta = {"hunger": 80.0, "fed": 0, "pets": 0, "pomo_min": 25,
                  "first_seen": "2026-10-01", "greet_day": "2026-10-18",
                  "last_seen": 0.0}
+    # 成就统计键：与 __init__ 一致（__new__ 绕过了构造函数，这里手工补齐）
+    for _k in E.ACH_COUNTERS:
+        pet._meta[_k] = 0
+    pet._meta["ach"] = {}
+    pet._meta["ach_unseen"] = []
+    pet._meta["pomo_total"] = 0
+    pet._meta["birthday"] = ""
+    pet._meta["owner_birthday"] = ""
+    pet._meta["night_day"] = ""
+    pet._meta["early_day"] = ""
+    pet._meta["streak_day"] = ""
+    for _c, _p in E.ACH_DAILY:
+        pet._meta[_c] = 0
+        pet._meta[_c + "_day"] = ""
+    # 成就统计键默认值由 init 之外的 ACH_COUNTERS 统一维护
     pet._restore_pos = None
     pet._pomo_end = None
     pet._pomo_raf = None
@@ -1032,13 +1047,13 @@ def main():
     p8.t = 1.0
     p8._last_t = 1.0
     p8.clock.ms = 1000.0
-    orig_ding = E.EjeePet._ding
+    orig_ding = E.EjeePet.__dict__["_ding"]     # staticmethod 描述符，原样存
     E.EjeePet._ding = lambda *a, **k: None      # 测试里别真的放提示音
     try:
         p8._pomo_end = p8.t + 0.01              # 下一拍就到点
         run(p8, 0.05)
     finally:
-        E.EjeePet._ding = orig_ding
+        E.EjeePet._ding = orig_ding             # 还原成 staticmethod（否则变实例方法）
     check("到点：完成计数 +1", p8._pomo_n == 1, "n=%d" % p8._pomo_n)
     check("到点：递进台词（含「第一颗番茄」）",
           "第一颗番茄" in p8.bubble_text, repr(p8.bubble_text[:24]))
@@ -1207,20 +1222,29 @@ def main():
     from ejee_ui import AchCard
     today = _time.strftime("%Y-%m-%d")
 
-    # ① 目录本身：25 项 / 5 分类 / 3 档 / 7 个隐藏（隐藏项必须有线索）
+    # ① 目录本身：43 项 / 5 分类 / 3 档 / 9 个隐藏（隐藏项必须有线索）
     hid = [k for k, d in E.ACH_DEFS.items() if d.get("hidden")]
-    check("成就：目录 25 项", len(E.ACH_DEFS) == 25, "%d" % len(E.ACH_DEFS))
+    check("成就：目录 43 项（含长期成就）", len(E.ACH_DEFS) == 43,
+          "%d" % len(E.ACH_DEFS))
     check("成就：五个分类都有条目",
           {d["cat"] for d in E.ACH_DEFS.values()}
           == {"company", "feed", "pat", "pomo", "play"})
     check("成就：档位只有铜/银/金",
           {d["tier"] for d in E.ACH_DEFS.values()} <= {1, 2, 3})
-    check("成就：隐藏项 7 个且都写了线索",
-          len(hid) == 7 and all(E.ACH_DEFS[k].get("hint") for k in hid),
+    check("成就：隐藏项 9 个且都写了线索",
+          len(hid) == 9 and all(E.ACH_DEFS[k].get("hint") for k in hid),
           ",".join(hid))
     check("成就：每项都有名称/说明/达成台词",
           all(d.get("name") and d.get("desc") and d.get("phrase")
               for d in E.ACH_DEFS.values()))
+    # 长期成就：goal 上千或按天连续，撑得起"长期"这个说法
+    long_goals = [d["goal"] for d in E.ACH_DEFS.values() if d["goal"] >= 1000]
+    check("成就：有足够多的大目标（≥1000）", len(long_goals) >= 5,
+          "%d 项：%s" % (len(long_goals), sorted(long_goals)))
+    check("成就：覆盖连续天数/陪伴时长/单日峰值三类新统计",
+          {"streak", "online_min", "feed_day_max", "pat_day_max",
+           "pomo_day_max", "pomo_min_total", "night_pomo", "holiday",
+           "cats_all"} <= {d["stat"] for d in E.ACH_DEFS.values()})
 
     # ② 结算：初次相遇 -> 一次连带多项 -> 不重复
     p16 = make_pet(app)
@@ -1245,16 +1269,21 @@ def main():
     p16b.t = 3.0
     p16b._last_t = 3.0
     p16b._meta["first_seen"] = "2020-01-01"   # 天数类全部达线
-    for k, v in (("fed", 500), ("pets", 500), ("pomo_total", 50),
-                 ("mischief", 1), ("dizzy", 1), ("stuffed", 1), ("shy", 1),
+    for k, v in (("fed", 2000), ("pets", 2000), ("pomo_total", 50),
+                 ("mischief", 10), ("dizzy", 1), ("stuffed", 1), ("shy", 1),
                  ("pomo_long", 1), ("zoom_big", 1), ("zoom_min", 1),
-                 ("night", 1), ("early", 1)):
+                 ("night", 1), ("early", 1), ("streak", 30),
+                 ("online_min", 6000), ("pomo_min_total", 3000),
+                 ("feed_day_max", 5), ("pat_day_max", 20),
+                 ("pomo_day_max", 4), ("night_pomo", 1), ("holiday", 1)):
         p16b._meta[k] = v
     p16b._check_ach(announce=False)
-    check("成就：条件全满足时 25 项全部解锁",
+    check("成就：条件全满足时 43 项全部解锁",
           len(p16b._meta["ach"]) == len(E.ACH_DEFS),
           "%d/%d" % (len(p16b._meta["ach"]), len(E.ACH_DEFS)))
     check("成就：收集家在后续轮次才达成", "collector" in p16b._meta["ach"])
+    check("成就：三十枚/样样都来一点也在多轮里达成",
+          {"ach30", "cats_all"} <= set(p16b._meta["ach"]))
 
     # ④ 成就册数据：进度 / 日期 / 隐藏线索 / 未读角标
     p17 = make_pet(app)
@@ -1331,13 +1360,105 @@ def main():
     p17d._mark_period()                      # 同一天再来不重复记
     check("成就埋点：时段每天只记一次", p17d._meta["night"] == 1)
 
-    # ⑧ 成就册窗口：能建起来、全部页签 25 张卡、切分类不炸
+    # ⑧ 长期成就的统计口径（连续天数 / 陪伴分钟 / 单日峰值 / 专注 / 深夜番茄 / 节日）
+    p17e = make_pet(app)
+    p17e.t = 5.0
+    p17e._last_t = 5.0
+    p17e.clock.ms = 5000.0
+    p17e._meta["first_seen"] = today
+    yday = _time.strftime("%Y-%m-%d",
+                          _time.localtime(_time.time() - 86400.0))
+    ago2 = _time.strftime("%Y-%m-%d",
+                          _time.localtime(_time.time() - 172800.0))
+    # 连续天数：昨天来过 -> +1；同一天不重复；断档 -> 从 1 重数
+    p17e._meta["streak_day"] = yday
+    p17e._meta["streak"] = 2
+    p17e._bump_streak()
+    check("长期成就：连续天数接着昨天累加",
+          p17e._meta["streak"] == 3 and p17e._meta["streak_day"] == today,
+          "streak=%d" % p17e._meta["streak"])
+    p17e._bump_streak()
+    check("长期成就：同一天只算一次", p17e._meta["streak"] == 3)
+    p17e._meta["streak_day"] = ago2
+    p17e._bump_streak()
+    check("长期成就：断了一天就从 1 重新数", p17e._meta["streak"] == 1)
+
+    # 单日峰值：昨天喂过 5 次，今天从 0 起算，但峰值不回落
+    p17e._meta["feed_day"] = 5
+    p17e._meta["feed_day_day"] = yday
+    p17e._meta["feed_day_max"] = 5
+    p17e._meta["hunger"] = 10.0
+    p17e.phase = "idle"
+    p17e.feed()
+    check("长期成就：单日计数跨天归零、峰值不回落",
+          p17e._meta["feed_day"] == 1 and p17e._meta["feed_day_max"] == 5,
+          "day=%d max=%d" % (p17e._meta["feed_day"],
+                             p17e._meta["feed_day_max"]))
+    check("长期成就：单日峰值到 5 解锁「一天五顿」",
+          "feed_day5" in p17e._meta["ach"])
+
+    p17e._meta["pat_day"] = 19
+    p17e._meta["pat_day_day"] = today
+    p17e._meta["pat_day_max"] = 19
+    p17e._pat_last = -100.0
+    p17e._pat()
+    check("长期成就：单日摸头第 20 次解锁「今天摸够了」",
+          p17e._meta["pat_day"] == 20 and "pat_day20" in p17e._meta["ach"])
+
+    # 专注：完成一颗 25 分钟番茄 -> 累计专注分钟、单日颗数、成就
+    p17e._meta["pomo_day"] = 3
+    p17e._meta["pomo_day_day"] = today
+    p17e._pomo_total = 25 * 60.0
+    p17e._pomo_end = p17e.t - 0.1
+    p17e.clock.ms += 200.0
+    p17e._tick()
+    check("长期成就：完成番茄累加专注分钟与单日颗数",
+          p17e._meta["pomo_min_total"] == 25 and p17e._meta["pomo_day"] == 4,
+          "%s 分钟 / %s 颗" % (p17e._meta["pomo_min_total"],
+                              p17e._meta["pomo_day"]))
+    check("长期成就：单日第 4 颗解锁「一天四颗」",
+          "pomo_day4" in p17e._meta["ach"])
+
+    real_lt2 = _time.localtime
+    try:                                  # 把时钟钉在凌晨 01:00 再完成一颗
+        E.time.localtime = lambda *a: _time.struct_time(
+            (2026, 11, 14, 1, 0, 0, 0, 318, 0))
+        p17e._pomo_total = 25 * 60.0
+        p17e._pomo_end = p17e.t - 0.1
+        p17e.clock.ms += 200.0
+        p17e._tick()
+    finally:
+        E.time.localtime = real_lt2
+    check("长期成就：凌晨完成番茄解锁「深夜的灯」",
+          p17e._meta["night_pomo"] == 1
+          and "night_pomo" in p17e._meta["ach"])
+
+    # 陪伴分钟：60 秒周期记账 + 节日彩蛋
+    p17f = make_pet(app)
+    p17f.t = 6.0
+    p17f._last_t = 6.0
+    p17f.clock.ms = 6000.0
+    p17f._meta["first_seen"] = today
+    p17f._meta["greet_day"] = ""
+    p17f._meta["birthday"] = _time.strftime("%m-%d")
+    p17f._maybe_greet()
+    check("长期成就：生日当天问过好 -> 解锁「记得日子」",
+          p17f._meta["holiday"] == 1 and "holiday" in p17f._meta["ach"])
+    before_min = p17f._meta["online_min"]
+    p17f._save_t = _time.time() - 61.0
+    p17f.clock.ms += 200.0
+    p17f._tick()
+    check("长期成就：运行中每满一分钟记一次陪伴时长",
+          p17f._meta["online_min"] == before_min + 1,
+          "%d -> %d" % (before_min, p17f._meta["online_min"]))
+
+    # ⑨ 成就册窗口：能建起来、全部页签 43 张卡、切分类不炸
     dlg = E.AchDialog(p17._ach_items())
     dlg.adjustSize()
     n_cards = len(dlg.findChildren(AchCard))
     check("成就册：窗口尺寸合理", dlg.width() > 480 and dlg.height() > 380,
           "%dx%d" % (dlg.width(), dlg.height()))
-    check("成就册：全部页签 25 张卡", n_cards == len(E.ACH_DEFS),
+    check("成就册：全部页签 43 张卡", n_cards == len(E.ACH_DEFS),
           "%d 张" % n_cards)
     dlg._filter("play")
     check("成就册：切到单分类不炸", dlg._cat == "play")
@@ -1852,6 +1973,66 @@ def main():
           x_lo <= x_hi and y_lo <= y_hi,
           "x %.0f..%.0f / y %.0f..%.0f" % (x_lo, x_hi, y_lo, y_hi))
     check("活动范围：小屏仍能生成散步路径", len(p38._ring_pts()) > 0)
+
+    # ---- 13p. 头顶叶子素材：叶尖不能被切平（2026-11-13 修复回归）----
+    print("  [13p] 头顶叶子素材")
+    from PySide6.QtGui import QImage as _Q2
+    _leaf = _Q2(E.res_path("leaf.png")).convertToFormat(_Q2.Format_RGBA8888)
+    _dry = _Q2(E.res_path("leaf_dry.png")).convertToFormat(
+        _Q2.Format_RGBA8888)
+    check("叶子素材：两张都在且同尺寸",
+          not _leaf.isNull() and _leaf.size() == _dry.size(),
+          "%dx%d" % (_leaf.width(), _leaf.height()))
+    _buf = bytes(_leaf.constBits())
+    _row = _leaf.width() * 4
+    _rows = []
+    for _y in range(_leaf.height()):
+        _n = sum(1 for _x in range(_leaf.width())
+                 if _buf[_y * _row + _x * 4 + 3] > 26)
+        if _n:
+            _rows.append((_y, _n))
+    _wmax = max(n for _i, n in _rows)
+    check("叶子素材：顶部是收尖的，不是被切平（首行 <12% 宽度）",
+          _rows[0][1] <= _wmax * 0.12,
+          "首行 %d / 最宽 %d" % (_rows[0][1], _wmax))
+    check("叶子素材：往下逐行变宽（叶尖是渐变的）",
+          _rows[1][1] < _rows[len(_rows) // 4][1])
+    # 素材尺寸必须与 LEAF_GEO 一致，否则改素材忘了改坐标就会错位/被裁
+    _k = E.EjeePet.CHAR_W / 1548.0
+    check("叶子素材：尺寸与 LEAF_GEO 对得上",
+          abs(E.LEAF_GEO[2] - _leaf.width() * _k) <= 0.3
+          and abs(E.LEAF_GEO[3] - _leaf.height() * _k) <= 0.3,
+          "geo %.2fx%.2f / 素材 %.2fx%.2f"
+          % (E.LEAF_GEO[2], E.LEAF_GEO[3], _leaf.width() * _k,
+             _leaf.height() * _k))
+    # 整窗渲染一次：叶子顶端也要是收尖的（画布/绘制矩形都没把它切平）
+    def _draw_leaf_at_body(pt, pet_):
+        """把叶子按身体组原点摆好再画（只画叶子，便于单独扫绿色像素）"""
+        pt.save()
+        pt.translate(pet_.BCX, pet_.BCY)
+        pet_._draw_leaf(pt, {"ha": 0.0})
+        pt.restore()
+
+    p40 = make_pet(app)
+    p40.t = 3.0
+    p40._last_t = 3.0
+    p40._load_assets()
+    _img = _render_layer(p40, lambda pt: _draw_leaf_at_body(pt, p40))
+    _b = bytes(_img.constBits())
+    _rw = _img.width() * 4
+    _gcnt = []
+    for _y in range(_img.height()):
+        _n = 0
+        for _x in range(_img.width()):
+            _i = _y * _rw + _x * 4
+            if (_b[_i + 3] > 26 and _b[_i + 1] > _b[_i] + 25):
+                _n += 1
+        _gcnt.append(_n)
+    _first = next((i for i, n in enumerate(_gcnt) if n > 0), -1)
+    check("叶子素材：渲染后的叶子顶端同样收尖（没被画布切平）",
+          _first > 0 and _gcnt[_first] <= max(_gcnt) * 0.20,
+          "首行 %d / 最宽 %d" % (_gcnt[_first] if _first >= 0 else -1,
+                                max(_gcnt)))
 
     print("\n" + "=" * 52)
     if FAILED:

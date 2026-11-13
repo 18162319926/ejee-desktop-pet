@@ -19,6 +19,8 @@ build_log*.txt
 tools/*
 # 例外：叶子拆分脚本是 assets/leaf*.png、base_body.png 的唯一来源，必须入库
 !tools/make_leaf_assets.py
+# 例外：叶子修复脚本是 leaf*.png 被切平后重建的唯一来源（含 LEAF_GEO 换算），必须入库
+!tools/repair_leaf.py
 # 例外：预览回归工具是每轮验证流程核心（--shot 比对/刷新基线），必须入库
 !tools/check_preview.py
 # 例外：Git Data API 备用推送通道（代理拦 443 时兜底），必须入库

@@ -1202,33 +1202,146 @@ def main():
           p15._yawn_t0 is None and p15._yawns_left == 0
           and p15._yawn_next == 1e9)
 
-    # ---- 13c. D1-3 成就系统 ----
+    # ---- 13c. D1-3 成就系统（2026-11-13 扩充：分类 / 档位 / 隐藏 / 进度）----
     print("  [13c] 成就系统")
+    from ejee_ui import AchCard
+    today = _time.strftime("%Y-%m-%d")
+
+    # ① 目录本身：25 项 / 5 分类 / 3 档 / 7 个隐藏（隐藏项必须有线索）
+    hid = [k for k, d in E.ACH_DEFS.items() if d.get("hidden")]
+    check("成就：目录 25 项", len(E.ACH_DEFS) == 25, "%d" % len(E.ACH_DEFS))
+    check("成就：五个分类都有条目",
+          {d["cat"] for d in E.ACH_DEFS.values()}
+          == {"company", "feed", "pat", "pomo", "play"})
+    check("成就：档位只有铜/银/金",
+          {d["tier"] for d in E.ACH_DEFS.values()} <= {1, 2, 3})
+    check("成就：隐藏项 7 个且都写了线索",
+          len(hid) == 7 and all(E.ACH_DEFS[k].get("hint") for k in hid),
+          ",".join(hid))
+    check("成就：每项都有名称/说明/达成台词",
+          all(d.get("name") and d.get("desc") and d.get("phrase")
+              for d in E.ACH_DEFS.values()))
+
+    # ② 结算：初次相遇 -> 一次连带多项 -> 不重复
     p16 = make_pet(app)
     p16.t = 3.0
     p16._last_t = 3.0
-    p16._meta["first_seen"] = _time.strftime("%Y-%m-%d")  # 屏蔽 day7 连带解锁
-    p16._meta["fed"] = 50
-    check("成就：fed50 达成解锁 1 项",
-          p16._check_ach(announce=False) == 1
-          and "fed50" in p16._meta["ach"])
+    p16._meta["first_seen"] = today          # 今天认识：只该解锁 day1
+    check("成就：首次结算解锁「初次相遇」",
+          p16._check_ach(announce=False) == 1 and "day1" in p16._meta["ach"])
     check("成就：重复结算不重复解锁",
           p16._check_ach(announce=False) == 0)
-    p16._meta["pomo_total"] = 10
-    check("成就：pomo10 跨类解锁",
+    p16._meta["fed"] = 50
+    check("成就：喂到 50 一次连带 fed1+fed50",
+          p16._check_ach(announce=False) == 2
+          and {"fed1", "fed50"} <= set(p16._meta["ach"]))
+    p16._meta["fed"] = 200
+    check("成就：fed200 只补一个（fed1/fed50 不重复）",
           p16._check_ach(announce=False) == 1
-          and "pomo10" in p16._meta["ach"])
+          and p16._meta["ach"]["fed200"] == today)
+
+    # ③ 多轮结算：「收集家」要等其他成就先落账，凑够 15 个才成立
+    p16b = make_pet(app)
+    p16b.t = 3.0
+    p16b._last_t = 3.0
+    p16b._meta["first_seen"] = "2020-01-01"   # 天数类全部达线
+    for k, v in (("fed", 500), ("pets", 500), ("pomo_total", 50),
+                 ("mischief", 1), ("dizzy", 1), ("stuffed", 1), ("shy", 1),
+                 ("pomo_long", 1), ("zoom_big", 1), ("zoom_min", 1),
+                 ("night", 1), ("early", 1)):
+        p16b._meta[k] = v
+    p16b._check_ach(announce=False)
+    check("成就：条件全满足时 25 项全部解锁",
+          len(p16b._meta["ach"]) == len(E.ACH_DEFS),
+          "%d/%d" % (len(p16b._meta["ach"]), len(E.ACH_DEFS)))
+    check("成就：收集家在后续轮次才达成", "collector" in p16b._meta["ach"])
+
+    # ④ 成就册数据：进度 / 日期 / 隐藏线索 / 未读角标
     p17 = make_pet(app)
     p17.t = 3.0
     p17._last_t = 3.0
-    p17._meta["first_seen"] = _time.strftime("%Y-%m-%d")  # 屏蔽 day7 连带解锁
-    p17._meta["fed"] = 200
-    p17._meta["pets"] = 100
-    check("成就：多项同刻一起解锁",
-          p17._check_ach(announce=False) == 3)   # fed50+fed200+pat100
+    p17._meta["first_seen"] = today
+    p17._meta["fed"] = 132
+    p17._meta["pets"] = 41
+    p17._check_ach(announce=False)
+    items = {it["key"]: it for it in p17._ach_items()}
+    check("成就册：进度取当前值",
+          items["fed200"]["cur"] == 132 and items["fed200"]["goal"] == 200
+          and items["pat100"]["cur"] == 41)
+    check("成就册：解锁项带达成日期",
+          items["fed1"]["unlocked"] and items["fed1"]["date"] == today)
+    check("成就册：隐藏项未解锁只给线索",
+          items["mischief"]["hidden"] and not items["mischief"]["unlocked"]
+          and bool(items["mischief"]["hint"]))
+    check("成就册：未读标记 + 菜单角标",
+          items["fed1"]["new"] and "个新" in p17._ach_label())
     p17._show_stats()
-    check("成就：档案文案带成就计数", "成就" in p17.bubble_text,
-          repr(p17.bubble_text[-14:]))
+    check("成就：档案文案带成就与隐藏计数",
+          "成就" in p17.bubble_text and "隐藏" in p17.bubble_text,
+          repr(p17.bubble_text[-18:]))
+
+    # ⑤ 庆祝分档：铜档少、金档多且撒星星
+    p17b = make_pet(app)
+    p17b.t = 10.0
+    p17b._last_t = 10.0
+    p17b._ach_cheer("pat1")
+    c1 = len([x for x in p17b.particles if x.kind == "confetti"])
+    check("成就庆祝：铜档用金色成就气泡",
+          p17b.bubble_style == "ach" and p17b._ach_tier == 1)
+    p17b.particles = []
+    p17b._ach_cheer("day365")
+    c3 = len([x for x in p17b.particles if x.kind == "confetti"])
+    check("成就庆祝：金档彩纸更多且撒星星",
+          c3 > c1 and any(x.kind == "star" for x in p17b.particles),
+          "铜 %d / 金 %d" % (c1, c3))
+    check("成就庆祝：金档台词带稀有标记", "稀 有 成 就" in p17b.bubble_text)
+
+    # ⑥ 埋点：抓尾巴 / 晕车 / 吃撑 三个隐藏条件真的会记账
+    p17c = make_pet(app)
+    p17c.t = 5.0
+    p17c._last_t = 5.0
+    p17c._meta["first_seen"] = today
+    p17c._mischief()
+    check("成就埋点：抓尾巴记 mischief 且解锁",
+          p17c._meta["mischief"] == 1 and "mischief" in p17c._meta["ach"])
+    p17c._start_dizzy()
+    check("成就埋点：晕车记 dizzy 且解锁",
+          p17c._meta["dizzy"] == 1 and "dizzy" in p17c._meta["ach"])
+    p17c._meta["hunger"] = 100.0
+    p17c._stuffed_until = 0.0
+    p17c.phase = "idle"
+    p17c.feed()
+    check("成就埋点：吃饱拒收记 stuffed 且解锁",
+          p17c._meta["stuffed"] == 1 and "stuffed" in p17c._meta["ach"])
+
+    # ⑦ 凌晨互动：把时钟钉在 03:00，走一次 _mark_period 就该记 night
+    p17d = make_pet(app)
+    p17d.t = 5.0
+    p17d._last_t = 5.0
+    p17d._meta["first_seen"] = today
+    real_lt = _time.localtime
+    try:
+        E.time.localtime = lambda *a: _time.struct_time(
+            (2026, 11, 13, 3, 0, 0, 0, 317, 0))
+        p17d._mark_period()
+    finally:
+        E.time.localtime = real_lt
+    check("成就埋点：凌晨互动记 night 且解锁",
+          p17d._meta["night"] == 1 and "night" in p17d._meta["ach"])
+    p17d._mark_period()                      # 同一天再来不重复记
+    check("成就埋点：时段每天只记一次", p17d._meta["night"] == 1)
+
+    # ⑧ 成就册窗口：能建起来、全部页签 25 张卡、切分类不炸
+    dlg = E.AchDialog(p17._ach_items())
+    dlg.adjustSize()
+    n_cards = len(dlg.findChildren(AchCard))
+    check("成就册：窗口尺寸合理", dlg.width() > 480 and dlg.height() > 380,
+          "%dx%d" % (dlg.width(), dlg.height()))
+    check("成就册：全部页签 25 张卡", n_cards == len(E.ACH_DEFS),
+          "%d 张" % n_cards)
+    dlg._filter("play")
+    check("成就册：切到单分类不炸", dlg._cat == "play")
+    dlg.deleteLater()
 
     # ---- 13d. D1-4 被盯久了 ----
     print("  [13d] 被盯久了")

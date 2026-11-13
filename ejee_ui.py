@@ -14,12 +14,12 @@ import time
 
 from PySide6.QtCore import Qt, QTimer, QPointF, QRectF, QPoint, Signal
 from PySide6.QtGui import (QPainter, QColor, QPen, QBrush, QPainterPath,
-                           QIcon, QPixmap, QLinearGradient, QCursor)
+                           QIcon, QPixmap, QLinearGradient, QCursor, QFont)
 from PySide6.QtWidgets import (QApplication, QWidget, QMenu, QDialog,
                                QLabel, QPushButton, QVBoxLayout, QHBoxLayout,
-                               QComboBox)
+                               QComboBox, QScrollArea, QGridLayout, QFrame)
 
-from ejee_paint import clamp, DW, PAD_T
+from ejee_paint import clamp, DW, PAD_T, paint_medal, star_path
 
 # ---- 番茄钟时长配置（与 PomoDialog 同住；ejee_pet 回导引用） ----
 POMO_PRESETS = [15, 25, 45, 60, 90]   # 番茄钟时长预设（分钟）
@@ -191,6 +191,35 @@ def _menu_icon(kind, col="#BC7A42"):
         p.drawLine(QPointF(6.6, 7.4), QPointF(6.6, 4.6))
         p.drawLine(QPointF(9.2, 7.2), QPointF(9.2, 3.8))
         p.drawLine(QPointF(11.8, 7.4), QPointF(11.8, 4.8))
+    elif kind == "heart":                    # 陪伴档案：小爱心
+        p.setPen(Qt.NoPen)
+        p.setBrush(c)
+        path = QPainterPath()
+        path.moveTo(9.0, 14.8)
+        path.cubicTo(1.4, 9.6, 2.2, 3.4, 6.3, 3.3)
+        path.cubicTo(8.0, 3.2, 8.9, 4.3, 9.0, 5.4)
+        path.cubicTo(9.1, 4.3, 10.0, 3.2, 11.7, 3.3)
+        path.cubicTo(15.8, 3.4, 16.6, 9.6, 9.0, 14.8)
+        path.closeSubpath()
+        p.drawPath(path)
+    elif kind == "star":                     # 生日：小星星
+        p.setPen(Qt.NoPen)
+        p.setBrush(c)
+        p.drawPath(star_path(9.0, 9.4, 6.3))
+    elif kind == "medal":                    # 成就册：圆章 + 绶带
+        p.drawEllipse(QPointF(9.0, 6.6), 4.5, 4.5)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(c.red(), c.green(), c.blue(), 165))
+        for dx in (-2.4, 2.4):
+            ribbon = QPainterPath()
+            ribbon.moveTo(9.0 + dx * 0.45, 10.2)
+            ribbon.lineTo(9.0 + dx, 15.6)
+            ribbon.lineTo(9.0 + dx * 0.18, 13.9)
+            ribbon.lineTo(9.0, 15.6)
+            ribbon.closeSubpath()
+            p.drawPath(ribbon)
+        p.setBrush(c)
+        p.drawPath(star_path(9.0, 6.6, 2.2))
     elif kind in ("radio_on", "radio_off"):  # 尺寸子菜单的单选标记
         if kind == "radio_on":
             p.setPen(QPen(QColor("#E1863A"), 1.3))
@@ -344,6 +373,27 @@ QPushButton#plain {
     padding: 7px 14px;
 }
 QPushButton#plain:hover { color: #6B4426; }
+/* ---- 成就册 ---- */
+QLabel#achHead {
+    color: #8A5B33;
+    font-family: "Microsoft YaHei UI", "Microsoft YaHei";
+    font-size: 10pt;
+    font-weight: 600;
+    padding: 3px 0 0 4px;
+}
+QScrollArea { background: transparent; border: none; }
+QScrollArea > QWidget > QWidget { background: transparent; }
+QScrollBar:vertical { background: transparent; width: 8px; margin: 2px 0; }
+QScrollBar::handle:vertical {
+    background: #EBD3B2;
+    border-radius: 4px;
+    min-height: 28px;
+}
+QScrollBar::handle:vertical:hover { background: #E0C097; }
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+    background: transparent;
+}
 """
 
 
@@ -874,3 +924,251 @@ class BirthdayDialog(QDialog):
         else:
             self.value = "%02d-%02d" % (int(m), int(d))
         super().accept()
+
+
+# ======================== 成就册 ========================
+# 分类显示顺序（数据源在 ejee_pet.ACH_DEFS 的 cat 字段）
+ACH_CATS = [("company", "陪伴"), ("feed", "投喂"), ("pat", "摸头"),
+            ("pomo", "专注"), ("play", "玩闹")]
+
+
+class AchCard(QWidget):
+    """成就册里的一格：左边奖章，右边名称 / 说明 / 进度。
+    整格自绘——QSS 做不出虚线待解锁边、渐变底和压在半格上的奖章。"""
+
+    H = 66
+
+    def __init__(self, item, parent=None):
+        super().__init__(parent)
+        self.it = item
+        self.setFixedHeight(self.H)
+        self.setMinimumWidth(232)
+        tip = item["desc"] if (item["unlocked"] or not item["hidden"]) \
+            else "线索：" + item["hint"]
+        self.setToolTip(tip)
+
+    def paintEvent(self, e):
+        it = self.it
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        w, h = float(self.width()), float(self.height())
+        rect = QRectF(1.0, 1.0, w - 2.0, h - 2.0)
+        on = bool(it["unlocked"])
+        # 卡片底：解锁 = 奶油渐变实线；未解锁 = 更浅 + 虚线（一眼看出没拿到）
+        if on:
+            g = QLinearGradient(rect.topLeft(), rect.bottomLeft())
+            g.setColorAt(0.0, QColor("#FFFDF8"))
+            g.setColorAt(1.0, QColor("#FFF3E0"))
+            p.setBrush(QBrush(g))
+            p.setPen(QPen(QColor("#EFD9BC"), 1.2))
+        else:
+            p.setBrush(QColor("#FBF7F0"))
+            p.setPen(QPen(QColor("#E4D5C2"), 1.1, Qt.DashLine))
+        p.drawRoundedRect(rect, 12.0, 12.0)
+        if it.get("new"):                    # 未读小红点
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor("#EE7A5A"))
+            p.drawEllipse(QPointF(w - 11.0, 11.0), 3.2, 3.2)
+        # 奖章（未解锁画灰章 + 问号）
+        paint_medal(p, 31.0, h / 2.0, 16.5, it["tier"], on, 0.0)
+
+        f = QFont()
+        f.setFamilies(["Microsoft YaHei UI", "Microsoft YaHei"])
+        f.setPixelSize(13)
+        f.setBold(True)
+        p.setFont(f)
+        p.setPen(QPen(QColor("#4A2C1E" if on else "#A89684")))
+        name = it["name"] if (on or not it["hidden"]) else "？？？"
+        p.drawText(QRectF(52.0, 7.0, w - 66.0, 18.0),
+                   Qt.AlignLeft | Qt.AlignVCenter, name)
+
+        f2 = QFont(f)
+        f2.setPixelSize(10)
+        f2.setBold(False)
+        p.setFont(f2)
+        p.setPen(QPen(QColor("#8C7660" if on else "#B3A392")))
+        if on or not it["hidden"]:
+            desc = it["desc"]
+        else:
+            desc = "线索：" + it["hint"]
+        fm = p.fontMetrics()
+        p.drawText(QRectF(52.0, 24.0, w - 64.0, 16.0),
+                   Qt.AlignLeft | Qt.AlignVCenter,
+                   fm.elidedText(desc, Qt.ElideRight, int(w - 66.0)))
+
+        f3 = QFont(f2)
+        f3.setPixelSize(9)
+        p.setFont(f3)
+        if on:                               # 解锁：写达成日期
+            p.setPen(QPen(QColor("#B08A5E")))
+            p.drawText(QRectF(52.0, h - 20.0, w - 64.0, 14.0),
+                       Qt.AlignLeft | Qt.AlignVCenter,
+                       ("%s 达成" % it["date"]) if it["date"] else "已达成")
+        elif not it["hidden"]:               # 未解锁：进度条（隐藏项不给进度）
+            cur = max(0, min(int(it["cur"]), int(it["goal"])))
+            goal = max(1, int(it["goal"]))
+            bar = QRectF(52.0, h - 17.0, w - 52.0 - 50.0, 5.0)
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor("#EEE0CC"))
+            p.drawRoundedRect(bar, 2.5, 2.5)
+            if cur > 0:
+                p.setBrush(QColor("#F2B463"))
+                p.drawRoundedRect(QRectF(bar.left(), bar.top(),
+                                         max(3.0, bar.width() * cur / goal),
+                                         bar.height()), 2.5, 2.5)
+            p.setPen(QPen(QColor("#A9906F")))
+            p.drawText(QRectF(w - 50.0, h - 23.0, 44.0, 16.0),
+                       Qt.AlignRight | Qt.AlignVCenter,
+                       "%d/%d" % (int(it["cur"]), int(it["goal"])))
+        p.end()
+
+
+class AchDialog(QDialog):
+    """成就册：分类胶囊筛选 + 两列卡片网格 + 进度 + 隐藏线索。
+    与 PomoDialog 同一套奶油卡片（无边框 + 自绘柔影），可拖动。"""
+
+    SHADOW = 10
+    RADIUS = 16
+    SCROLL_W, SCROLL_H = 520, 334
+
+    def __init__(self, items, parent=None):
+        super().__init__(parent)
+        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint
+                            | Qt.NoDropShadowWindowHint)
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setModal(True)
+        self.setStyleSheet(DIALOG_QSS)
+        self.items = list(items)
+        self._cat = "all"
+        self._drag = None
+        self._build_ui()
+
+    # ---- 界面 ----
+    def _build_ui(self):
+        sh = self.SHADOW
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(sh + 18, sh + 12, sh + 18, sh + 14)
+        lay.setSpacing(8)
+
+        title = QLabel("成就册")
+        title.setObjectName("dlgTitle")
+        title.setAlignment(Qt.AlignHCenter)
+        lay.addWidget(title)
+
+        n = len(self.items)
+        got = sum(1 for it in self.items if it["unlocked"])
+        hid = [it for it in self.items if it["hidden"]]
+        got_h = sum(1 for it in hid if it["unlocked"])
+        sub = QLabel("已解锁 %d / %d　·　完成度 %d%%　·　隐藏 %d / %d"
+                     % (got, n, int(round(got * 100.0 / max(1, n))),
+                        got_h, len(hid)))
+        sub.setObjectName("dlgHint")
+        sub.setAlignment(Qt.AlignHCenter)
+        lay.addWidget(sub)
+
+        chips = QHBoxLayout()
+        chips.setSpacing(6)
+        chips.setAlignment(Qt.AlignHCenter)
+        self._chips = []
+        for key, label in [("all", "全部")] + ACH_CATS:
+            b = QPushButton(label)
+            b.setObjectName("chip")
+            b.setCheckable(True)
+            b.setCursor(Qt.PointingHandCursor)
+            b.clicked.connect(lambda checked=False, k=key: self._filter(k))
+            chips.addWidget(b)
+            self._chips.append((key, b))
+        lay.addLayout(chips)
+
+        self._scroll = QScrollArea()
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setFrameShape(QFrame.NoFrame)
+        self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self._scroll.setFixedSize(self.SCROLL_W, self.SCROLL_H)
+        self._content = QWidget()
+        self._grid = QVBoxLayout(self._content)
+        self._grid.setContentsMargins(2, 2, 2, 2)
+        self._grid.setSpacing(7)
+        self._scroll.setWidget(self._content)
+        lay.addWidget(self._scroll, 0, Qt.AlignHCenter)
+
+        foot = QHBoxLayout()
+        self._foot = QLabel("")
+        self._foot.setObjectName("dlgHint")
+        foot.addWidget(self._foot)
+        foot.addStretch(1)
+        b_close = QPushButton("收好")
+        b_close.setObjectName("primary")
+        b_close.setCursor(Qt.PointingHandCursor)
+        b_close.setDefault(True)
+        b_close.clicked.connect(self.accept)
+        foot.addWidget(b_close)
+        lay.addLayout(foot)
+
+        self._filter("all")
+
+    @staticmethod
+    def _clear_layout(lay):
+        while lay.count():
+            item = lay.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.setParent(None)
+                w.deleteLater()
+            else:
+                sub = item.layout()
+                if sub is not None:
+                    AchDialog._clear_layout(sub)
+
+    def _filter(self, key):
+        self._cat = key
+        for k, b in self._chips:
+            b.setChecked(k == key)
+        self._populate()
+
+    def _populate(self):
+        self._clear_layout(self._grid)
+        cats = ACH_CATS if self._cat == "all" \
+            else [c for c in ACH_CATS if c[0] == self._cat]
+        for ck, clabel in cats:
+            rows = [it for it in self.items if it["cat"] == ck]
+            if not rows:
+                continue
+            got = sum(1 for it in rows if it["unlocked"])
+            head = QLabel("%s　%d / %d" % (clabel, got, len(rows)))
+            head.setObjectName("achHead")
+            self._grid.addWidget(head)
+            grid = QGridLayout()
+            grid.setContentsMargins(0, 0, 0, 0)
+            grid.setHorizontalSpacing(8)
+            grid.setVerticalSpacing(7)
+            for i, it in enumerate(rows):
+                grid.addWidget(AchCard(it), i // 2, i % 2)
+            self._grid.addLayout(grid)
+        self._grid.addStretch(1)
+        n_new = sum(1 for it in self.items if it.get("new"))
+        if n_new:
+            self._foot.setText("有 %d 个刚解锁的成就（右上角小红点）。" % n_new)
+        else:
+            self._foot.setText("成就没有终点，慢慢来就好。")
+
+    # ---- 无边框窗口：拖动 + 卡片底 ----
+    def paintEvent(self, e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        _paint_card(p, QRectF(self.rect()), self.SHADOW, self.RADIUS)
+        p.end()
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.LeftButton:
+            self._drag = (e.globalPosition().toPoint()
+                          - self.frameGeometry().topLeft())
+            e.accept()
+
+    def mouseMoveEvent(self, e):
+        if self._drag is not None and e.buttons() & Qt.LeftButton:
+            self.move(e.globalPosition().toPoint() - self._drag)
+            e.accept()
+
+    def mouseReleaseEvent(self, e):
+        self._drag = None

@@ -91,7 +91,103 @@ BUBBLE_THEMES = {
     "zzz": dict(edge="#AFC6E4", top="#FFFFFF", bot="#EAF3FC",
                 gloss=0.0, deco=None, wob=0.0, wob_sp=6.0,
                 font="round", size=15),
+    # 成就解锁：金色奖章气泡（内嵌一枚铜/银/金奖章，见 _draw_ach_medal）
+    "ach": dict(edge="#E0A21A", top="#FFFDF4", bot="#FFEFC2",
+                gloss=0.75, deco=None, wob=0.0, wob_sp=6.0,
+                font="round", size=12),
 }
+
+# 成就奖章档位配色：(章体, 暗边, 高光) —— 铜 / 银 / 金（气泡与成就册共用）
+ACH_TIER_COLORS = {
+    1: ("#E7B07A", "#B9762F", "#FFE2BE"),
+    2: ("#C9D6E2", "#8A9AAB", "#F2F8FF"),
+    3: ("#F7CF5A", "#BF8A12", "#FFF3B8"),
+}
+
+
+def star_path(cx, cy, r):
+    """五角星路径（r = 外半径）。奖章 / 徽章行共用。"""
+    path = QPainterPath()
+    for k in range(10):
+        rr = r if k % 2 == 0 else r * 0.45
+        ang = -math.pi / 2.0 + k * math.pi / 5.0
+        pt = QPointF(cx + math.cos(ang) * rr, cy + math.sin(ang) * rr)
+        if k == 0:
+            path.moveTo(pt)
+        else:
+            path.lineTo(pt)
+    path.closeSubpath()
+    return path
+
+
+def paint_medal(p, cx, cy, r, tier=1, unlocked=True, t=0.0):
+    """画一枚成就奖章（气泡里的、成就册里的都是这一枚）。
+    tier 1 铜 / 2 银 / 3 金；unlocked=False 画成灰色的「？」待解锁章。
+    奖章背后有一圈随 t 慢转的放射光（缩略图里传 t=0 就静止）。"""
+    tier = int(min(3, max(1, tier)))
+    if unlocked:
+        base, dark, light = ACH_TIER_COLORS[tier]
+    else:
+        base, dark, light = "#E7DCCB", "#B9A88E", "#F7F1E6"
+    # 放射光：细长三角向外发散（解锁后才亮）
+    if unlocked:
+        n = 16 if tier >= 3 else 12
+        alpha = 74 if tier >= 3 else 46
+        p.save()
+        p.translate(cx, cy)
+        p.rotate(t * 16.0)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(247, 204, 92, alpha))
+        for i in range(n):
+            p.save()
+            p.rotate(i * 360.0 / n)
+            ray = QPainterPath()
+            ray.moveTo(-r * 0.14, -r * 1.02)
+            ray.lineTo(0.0, -r * 1.60)
+            ray.lineTo(r * 0.14, -r * 1.02)
+            ray.closeSubpath()
+            p.drawPath(ray)
+            p.restore()
+        p.restore()
+    # 章体：径向渐变（左上受光）+ 暗色圈边
+    g = QRadialGradient(QPointF(cx - r * 0.32, cy - r * 0.38), r * 1.45)
+    g.setColorAt(0.0, QColor(light))
+    g.setColorAt(0.55, QColor(base))
+    g.setColorAt(1.0, QColor(dark))
+    p.setPen(QPen(QColor(dark), 1.5))
+    p.setBrush(QBrush(g))
+    p.drawEllipse(QPointF(cx, cy), r, r)
+    # 内圈细亮环
+    p.setPen(QPen(QColor(255, 255, 255, 150 if unlocked else 110), 1.1))
+    p.setBrush(Qt.NoBrush)
+    p.drawEllipse(QPointF(cx, cy), r * 0.80, r * 0.80)
+    p.setPen(Qt.NoPen)
+    if not unlocked:                     # 待解锁：一个问号
+        f = QFont()
+        f.setFamilies(list(FONT_ROUND))
+        f.setPixelSize(max(8, int(r * 1.15)))
+        f.setBold(True)
+        p.setFont(f)
+        p.setPen(QPen(QColor(dark)))
+        p.drawText(QRectF(cx - r, cy - r, 2 * r, 2 * r),
+                   Qt.AlignCenter, "?")
+        p.setPen(Qt.NoPen)
+    else:
+        # 档位星数：铜 1 / 银 2 / 金 3（金档排成向上的小弧，中间那颗最大）。
+        # 星用章体暗色画——白色星会被渐变高光吃掉（2026-11-13 实测）
+        stars = {1: [(0.0, 0.02, 0.34)],
+                 2: [(-0.26, 0.02, 0.24), (0.26, 0.02, 0.24)],
+                 3: [(-0.40, 0.13, 0.17), (0.0, -0.06, 0.25),
+                     (0.40, 0.13, 0.17)]}[tier]
+        p.setBrush(QColor(dark))
+        for dx, dy, k in stars:
+            p.drawPath(star_path(cx + dx * r, cy + dy * r, k * r))
+    # 左上高光（收小一点，别盖住章面的星）
+    p.setBrush(QColor(255, 255, 255, 130 if unlocked else 90))
+    p.drawEllipse(QPointF(cx - r * 0.44, cy - r * 0.48),
+                  r * 0.15, r * 0.095)
+    p.setPen(Qt.NoPen)
+
 
 # 状态 -> 气泡主题名（优先于 bubble_style，让每个状态有自己的皮肤）
 STATE_BUBBLE_THEME = {
@@ -1388,7 +1484,10 @@ class EjeePaintMixin:
     def _bubble_theme(self):
         """本条气泡的皮肤：状态优先（傲娇粉 / 果汁橙 / 晕车浅绿 / 生气橙红…），
         再按 bubble_style 回落。屏幕上有面包渣且没有更激烈的状态时，换成
-        可怜蓝（配一滴将落未落的眼泪）。"""
+        可怜蓝（配一滴将落未落的眼泪）。
+        成就气泡例外：金框是它的身份标识，任何状态下都不让位。"""
+        if self.bubble_style == "ach":
+            return BUBBLE_THEMES["ach"]
         if self._crumbs and self.state in ("idle", "happy"):
             return BUBBLE_THEMES["crumb"]
         name = STATE_BUBBLE_THEME.get(self.state) or self.bubble_style
@@ -1651,6 +1750,11 @@ class EjeePaintMixin:
                                 Qt.TextWordWrap, self.bubble_text)
         w = max(96.0, trect.width() + 44.0)
         h = max(38.0, trect.height() + 26.0)
+        # 成就气泡：左边留一枚奖章的位置，气泡整体加宽（金框 + 奖章）
+        medal = (style == "ach")
+        if medal:
+            w = max(212.0, trect.width() + 112.0)
+            h = max(70.0, trect.height() + 34.0)
         if style == "round":
             # 圆形泡泡：正文改为竖排不换行的窄条（泡泡框本身就窄）
             w = max(72.0, min(w, 150.0))
@@ -1753,10 +1857,15 @@ class EjeePaintMixin:
             p.drawArc(rr_, 296 * 16, 22 * 16)
         p.setFont(f)
         p.setPen(QPen(INK))
-        area = QRectF(bx + 15, y_b - h, w - 30, h - 26.0 if badges else h)
+        dx_ach = 54.0 if medal else 0.0
+        area = QRectF(bx + 15 + dx_ach, y_b - h,
+                      w - 30 - dx_ach, h - 26.0 if badges else h)
         # 打字机已移除：全量文本中排直画（有徽章行同理，徽章占底部行）
         p.drawText(area, Qt.AlignHCenter | Qt.AlignVCenter
                    | Qt.TextWordWrap, self.bubble_text)
+        if medal:                        # 奖章画在文字左侧，压在最上层
+            self._draw_ach_medal(p, bx + 37.0, y_b - h / 2.0, 20.0,
+                                 int(getattr(self, "_ach_tier", 1)))
         if badges:
             self._draw_stat_badges(p, bx, y_b, w, badges)
         p.restore()
@@ -1803,3 +1912,9 @@ class EjeePaintMixin:
             p.setPen(QPen(INK))
             p.drawText(QRectF(cx + 1.0, cy - 9.0, seg - 10.0, 18.0),
                        Qt.AlignLeft | Qt.AlignVCenter, str(val))
+
+    # ==================== 成就奖章 ====================
+    def _draw_ach_medal(self, p, cx, cy, r, tier):
+        """成就气泡里那枚奖章。画法在模块级 paint_medal（成就册窗口共用
+        同一枚章），这里只把当前时间传进去，让放射光慢慢转。"""
+        paint_medal(p, cx, cy, r, tier, True, self.t)
